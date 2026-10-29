@@ -9,7 +9,6 @@
 #import "FBSDKBasicUtility.h"
 
 #import <CommonCrypto/CommonCrypto.h>
-#import <os/lock.h>
 #import <zlib.h>
 
 #import "FBSDKTypeUtility.h"
@@ -18,7 +17,6 @@
 
 static NSString *const FBSDK_BASICUTILITY_ANONYMOUSIDFILENAME = @"com-facebook-sdk-PersistedAnonymousID.json";
 static NSString *const FBSDK_BASICUTILITY_ANONYMOUSID_KEY = @"anon_id";
-static os_unfair_lock g_anonymousIDLock = OS_UNFAIR_LOCK_INIT;
 
 void fb_dispatch_on_main_thread(dispatch_block_t block)
 {
@@ -305,45 +303,20 @@ NS_ASSUME_NONNULL_END
   return result;
 }
 
-+ (void)load
-{
-  [self.class persistNewAnonymousIDIfNeeded];
-}
-
 + (NSString *)anonymousID
 {
   // Grab previously written anonymous ID and, if none have been generated, create and
   // persist a new one which will remain associated with this app.
-  os_unfair_lock_lock(&g_anonymousIDLock);
   NSString *result = [self.class retrievePersistedAnonymousID];
   if (!result) {
-    result = [self.class generateAnonymousID];
-    [self.class persistAnonymousID:result];
+    // Generate a new anonymous ID.  Create as a UUID, but then prepend the fairly
+    // arbitrary 'XZ' to the front so it's easily distinguishable from IDFA's which
+    // will only contain hex.
+    result = [NSString stringWithFormat:@"XZ%@", [NSUUID UUID].UUIDString];
+
+    [self persistAnonymousID:result];
   }
-  os_unfair_lock_unlock(&g_anonymousIDLock);
   return result;
-}
-
-+ (void)persistNewAnonymousIDIfNeeded
-{
-  os_unfair_lock_lock(&g_anonymousIDLock);
-  if (![self.class anonymousIDFileExists]) {
-    [self.class persistAnonymousID:[self.class generateAnonymousID]];
-  }
-  os_unfair_lock_unlock(&g_anonymousIDLock);
-}
-
-+ (NSString *)generateAnonymousID
-{
-  // Create as a UUID, but then prepend the fairly arbitrary 'XZ' to the front so it's
-  // easily distinguishable from IDFA's which will only contain hex.
-  return [NSString stringWithFormat:@"XZ%@", [NSUUID UUID].UUIDString];
-}
-
-+ (BOOL)anonymousIDFileExists
-{
-  NSString *file = [self.class persistenceFilePath:FBSDK_BASICUTILITY_ANONYMOUSIDFILENAME];
-  return [NSFileManager.defaultManager fileExistsAtPath:file];
 }
 
 + (NSString *)retrievePersistedAnonymousID

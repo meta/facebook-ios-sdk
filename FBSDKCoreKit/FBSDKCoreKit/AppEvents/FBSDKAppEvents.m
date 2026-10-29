@@ -152,6 +152,10 @@ static BOOL g_hasLoggedManualImplicitLoggingWarning = NO;
 {
   if (self == FBSDKAppEvents.class) {
     g_overrideAppID = [[NSBundle.mainBundle objectForInfoDictionaryKey:FBSDKAppEventsOverrideAppIDBundleKey] copy];
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^(void) {
+      // Forces reading or creating of `anonymousID` used by this type
+      [FBSDKBasicUtility anonymousID];
+    });
   }
 }
 
