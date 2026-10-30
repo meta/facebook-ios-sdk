@@ -160,8 +160,12 @@ def report_allowlist_usage(hits: collections.Counter) -> None:
             print(f"      0  {entry}")
 
 
-def find_iphone_simulator_destination():
-    """Dynamically find an available iPhone simulator instead of hardcoding a model."""
+def find_iphone_simulator_id():
+    """UDID of an available iPhone simulator on the newest iOS runtime.
+
+    Exits with an error when there is none, instead of guessing a device name that
+    the installed runtime may not have.
+    """
     result = subprocess.run(
         ["/usr/bin/xcrun", "simctl", "list", "--json", "devices", "available"],
         capture_output=True,
@@ -169,20 +173,25 @@ def find_iphone_simulator_destination():
         encoding="utf-8",
     )
     if result.returncode != 0:
-        return "iPhone 16"
+        sys.exit(f"Listing simulators failed: {result.stderr.strip()[:500]}")
 
-    try:
-        data = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        return "iPhone 16"
-
-    for runtime_devices in data.get("devices", {}).values():
-        for device in runtime_devices:
+    candidates = []
+    for runtime, devices in json.loads(result.stdout).get("devices", {}).items():
+        match = re.search(r"SimRuntime\.iOS-([\d-]+)$", runtime)
+        if not match:
+            continue
+        version = tuple(int(part) for part in match.group(1).split("-"))
+        for device in devices:
             name = device.get("name", "")
             if name.startswith("iPhone") and "SE" not in name:
-                return name
+                model = re.search(r"\d+", name)
+                candidates.append((version, int(model.group()) if model else -1, name, device["udid"]))
+    if not candidates:
+        sys.exit("No available iPhone simulator. Install an iOS simulator runtime for the selected Xcode.")
 
-    return "iPhone 16"
+    version, _, name, udid = max(candidates, key=lambda c: (c[0], c[1], c[2]))
+    print(f"Using {name} on iOS {'.'.join(map(str, version))}")
+    return udid
 
 
 def main():
@@ -206,15 +215,15 @@ def main():
     base_dir = git_base_dir() if is_git_dir() else generic_base_dir()
     os.chdir(base_dir)
 
-    destination = find_iphone_simulator_destination()
-    print(f"Using simulator destination: {destination}")
+    destination_id = find_iphone_simulator_id()
+    print(f"Using simulator destination: id={destination_id}")
 
     xcodebuild_command = " ".join(
         [
             "xcodebuild clean build-for-testing",
             "-workspace FacebookSDK.xcworkspace",
             "-scheme BuildAllKits-Dynamic",
-            f"-destination 'platform=iOS Simulator,name={destination}'",
+            f"-destination 'id={destination_id}'",
         ]
     )
 
