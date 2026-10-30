@@ -26,6 +26,11 @@ XCODEBUILD_WARNINGS_ALLOWLIST = [
     # one of our own frameworks is a real problem and must still be caught.
     "but linking with dylib '@rpath/XCTest.framework/XCTest' which was built for newer version",
     "but linking with dylib '@rpath/libXCTestSwiftSupport.dylib' which was built for newer version",
+    # Apple's own StoreKitTest header, reported once per installed simulator SDK, so every
+    # new SDK version surfaced it as "new". Matched on the header path, because raw lines
+    # put ":line:col:" between it and the message; the same deprecation in this repo's
+    # code is still caught.
+    "StoreKitTest.framework/Headers/SKTestTransaction.h:",
 ]
 
 # Anything not matched above is compared against scripts/xcodebuild_warnings_baseline.txt.
