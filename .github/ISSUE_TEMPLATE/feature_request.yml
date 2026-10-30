@@ -9,9 +9,9 @@ body:
     options:
     - label: "I've updated to the latest released version of the SDK"
       required: true
-    - label: "I've searched for existing [Github issues](https://github.com/facebook/facebook-ios-sdk/issues)"
+    - label: "I've searched for existing [Github issues](https://github.com/meta/facebook-ios-sdk/issues)"
       required: true
-    - label: "I've read the [Code of Conduct](https://github.com/facebook/facebook-ios-sdk/blob/main/CODE_OF_CONDUCT.md)"
+    - label: "I've read the [Code of Conduct](https://github.com/meta/facebook-ios-sdk/blob/main/CODE_OF_CONDUCT.md)"
       required: true
 - type: textarea
   id: goals

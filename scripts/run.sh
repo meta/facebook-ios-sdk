@@ -98,7 +98,7 @@ main() {
       exit 1
     fi
 
-    SDK_GIT_REMOTE="https://github.com/facebook/facebook-ios-sdk"
+    SDK_GIT_REMOTE="https://github.com/meta/facebook-ios-sdk"
 
     if [ -f "$PWD/internal/scripts/internal_globals.sh" ]; then SDK_INTERNAL=1; else SDK_INTERNAL=0; fi
   fi
