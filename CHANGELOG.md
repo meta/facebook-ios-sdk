@@ -10,7 +10,19 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## Unreleased
 
-[Full Changelog](https://github.com/meta/facebook-ios-sdk/compare/v19.0.0...HEAD)
+[Full Changelog](https://github.com/meta/facebook-ios-sdk/compare/v19.0.1...HEAD)
+
+## 19.0.1
+
+[2026-10-30](https://github.com/meta/facebook-ios-sdk/releases/tag/v19.0.1) |
+[Full Changelog](https://github.com/meta/facebook-ios-sdk/compare/v19.0.0...v19.0.1)
+
+### Changed
+- Reverted the 19.0.0 change that created the anonymous ID at app launch. It is again created
+  when App Events is first used.
+- The repository moved to [github.com/meta/facebook-ios-sdk](https://github.com/meta/facebook-ios-sdk).
+  Swift Package Manager and CocoaPods now download the XCFrameworks from the new location. Old URLs
+  redirect, but Swift Package Manager users should update their package URL.
 
 ## 19.0.0
 
