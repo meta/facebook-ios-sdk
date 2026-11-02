@@ -4,8 +4,9 @@
 // This source code is licensed under the license found in the
 // LICENSE file in the root directory of this source tree.
 
-// Architectures
-ARCHS = $(ARCHS_STANDARD) arm64e
+// Architectures. Device slices follow ARCHS_STANDARD (arm64).
+// Opt into arm64e with a custom build: ARCHS="arm64 arm64e"
+ARCHS = $(ARCHS_STANDARD)
 IPHONEOS_DEPLOYMENT_TARGET = 15.0
 SDKROOT = iphoneos
 
