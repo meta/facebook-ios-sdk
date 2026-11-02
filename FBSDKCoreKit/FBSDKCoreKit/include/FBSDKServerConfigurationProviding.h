@@ -36,11 +36,13 @@ NS_SWIFT_NAME(_ServerConfigurationProviding)
  Executes the completionBlock with a valid and current configuration when it is available.
 
  This method will use a cached configuration if it is valid and not expired.
+ If a recent load failed, the completion receives the last configuration and error until the retry cooldown expires.
  */
 - (void)loadServerConfigurationWithCompletionBlock:(nullable FBSDKServerConfigurationBlock)completionBlock;
 
 - (void)processLoadRequestResponse:(id)result error:(nullable NSError *)error appID:(NSString *)appID;
 
+/// Returns nil during the retry cooldown after a recent failure for the requested app.
 - (nullable FBSDKGraphRequest *)requestToLoadServerConfiguration:(NSString *)appID;
 
 @end
