@@ -188,6 +188,9 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## 17.0.0
 
+**Migration guidance (current SDK):** See [Handling Facebook Login and Limited Login](LOGIN_MIGRATION.md) for credential
+handling and Graph API compatibility. The guide describes current source behavior, not a frozen snapshot of 17.0.0.
+
 ### Added
 
 - Added privacy manifests
