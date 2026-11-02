@@ -30,6 +30,8 @@ Please take a moment and [subscribe to releases](https://docs.github.com/en/ente
 1. Check-out the tutorials available online at: <https://developers.facebook.com/docs/ios/getting-started>
 1. Start coding! Visit <https://developers.facebook.com/docs/ios> for tutorials and reference documentation.
 
+For existing login integrations, see [Handling Facebook Login and Limited Login](LOGIN_MIGRATION.md) before upgrading.
+
 ### Migrating from CocoaPods
 
 CocoaPods is not supported starting with v19.0.1. To keep receiving updates, move to Swift Package Manager:
