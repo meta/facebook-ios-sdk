@@ -75,11 +75,10 @@ extension IAPDedupeProcessor {
     guard let dependencies = try? Self.getDependencies() else {
       return
     }
-    timer?.invalidate()
-    timer = nil
     var manualEvents: [DedupableEvent] = []
     var implicitEvents: [DedupableEvent] = []
     synchronized(self) {
+      cancelDedupTimer()
       manualEvents = manuallyLoggedEvents
       manuallyLoggedEvents = []
       implicitEvents = implicitlyLoggedEvents
@@ -306,34 +305,70 @@ extension IAPDedupeProcessor {
 
 extension IAPDedupeProcessor {
   private func scheduleDedupTimer() {
-    if timer == nil {
+    synchronized(self) {
+      guard timer == nil else {
+        return
+      }
+      let newTimer = Timer(timeInterval: Self.dedupWindow, repeats: false) { timer in
+        self.dedupTimerFired(timer)
+      }
+      // Reserve this window before dispatching so another event cannot queue a second timer.
+      timer = newTimer
       DispatchQueue.main.async {
-        self.timer = Timer.scheduledTimer(withTimeInterval: Self.dedupWindow, repeats: false) { _ in
-          self.dedupTimerFired()
+        synchronized(self) {
+          guard self.timer === newTimer else {
+            return
+          }
+          RunLoop.main.add(newTimer, forMode: .default)
         }
       }
     }
   }
 
-  private func dedupTimerFired() {
-    Task {
-      await IAPTransactionObserver.shared.observeNewTransactions()
-      executeDedupTimerFired()
+  private func cancelDedupTimer() {
+    synchronized(self) {
+      let cancelledTimer = timer
+      timer = nil
+      // A timer must be invalidated on the thread whose run loop owns it.
+      DispatchQueue.main.async {
+        cancelledTimer?.invalidate()
+      }
     }
   }
 
-  private func executeDedupTimerFired() {
-    timer?.invalidate()
-    timer = nil
+  private func dedupTimerFired(_ firedTimer: Timer) {
+    Task {
+      await IAPTransactionObserver.shared.observeNewTransactions()
+      guard let events = await self.takeEventsForDedupTimer(firedTimer) else {
+        return
+      }
+      var (implicitEvents, manualEvents) = events
+      Self.performDedup(implicitEvents: &implicitEvents, manualEvents: &manualEvents)
+    }
+  }
+
+  @MainActor
+  private func takeEventsForDedupTimer(_ firedTimer: Timer) -> ([DedupableEvent], [DedupableEvent])? {
     var implicitEvents: [DedupableEvent] = []
     var manualEvents: [DedupableEvent] = []
+    var shouldProcess = false
     synchronized(self) {
+      // Saving/resetting may have cancelled this window while transaction observation was suspended.
+      guard timer === firedTimer else {
+        return
+      }
+      firedTimer.invalidate()
+      timer = nil
+      shouldProcess = true
       implicitEvents = implicitlyLoggedEvents
       implicitlyLoggedEvents = []
       manualEvents = manuallyLoggedEvents
       manuallyLoggedEvents = []
     }
-    Self.performDedup(implicitEvents: &implicitEvents, manualEvents: &manualEvents)
+    guard shouldProcess else {
+      return nil
+    }
+    return (implicitEvents, manualEvents)
   }
 
   private class func injectDedupeParameters(
@@ -625,10 +660,11 @@ extension IAPDedupeProcessor {
     UserDefaults.standard.removeObject(forKey: IAPConstants.implicitlyLoggedDedupableEventsKey)
     UserDefaults.standard.removeObject(forKey: IAPConstants.manuallyLoggedDedupableEventsKey)
     Self.configuredDependencies = nil
-    manuallyLoggedEvents = []
-    implicitlyLoggedEvents = []
-    timer?.invalidate()
-    timer = nil
+    synchronized(self) {
+      manuallyLoggedEvents = []
+      implicitlyLoggedEvents = []
+      cancelDedupTimer()
+    }
   }
 
   func appendManualEvent(_ event: DedupableEvent) {
