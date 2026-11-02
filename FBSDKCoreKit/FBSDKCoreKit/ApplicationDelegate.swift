@@ -466,6 +466,7 @@ public final class ApplicationDelegate: NSObject {
 
   private func initializeTokenCache() {
     components.accessTokenWallet.current = components.accessTokenWallet.tokenCache?.accessToken
+    components.authenticationTokenWallet.current = components.authenticationTokenWallet.tokenCache?.authenticationToken
   }
 
   private func fetchServerConfiguration() {
@@ -492,7 +493,6 @@ public final class ApplicationDelegate: NSObject {
   }
 
   private func checkAuthentication() {
-    components.authenticationTokenWallet.current = components.authenticationTokenWallet.tokenCache?.authenticationToken
     if components.authenticationTokenWallet.current != nil {
       restoredSessionObserverProvider()?.didRestoreAuthenticationSession()
     }
