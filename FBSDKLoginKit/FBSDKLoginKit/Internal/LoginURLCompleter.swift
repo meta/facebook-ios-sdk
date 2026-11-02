@@ -346,9 +346,9 @@ struct LoginURLCompleter: LoginCompleting {
   }
 
   func expirationDateFrom(parameters: [String: Any]) -> Date {
-    let expires = parameters["expires"] as? TimeInterval
-    let expiresAt = parameters["expires_at"] as? TimeInterval
-    let expiresIn = parameters["expires_in"] as? TimeInterval
+    let expires = timeInterval(from: parameters["expires"])
+    let expiresAt = timeInterval(from: parameters["expires_at"])
+    let expiresIn = timeInterval(from: parameters["expires_in"])
 
     let expirationDate = expires ?? expiresAt
 
@@ -365,13 +365,22 @@ struct LoginURLCompleter: LoginCompleting {
 
   func dataAccessExpirationDateFrom(parameters: [String: Any]) -> Date {
     guard
-      let dataAccessExpirationDate = parameters["data_access_expiration_time"] as? Double,
+      let dataAccessExpirationDate = timeInterval(from: parameters["data_access_expiration_time"]),
       dataAccessExpirationDate > 0
     else {
       return Date.distantFuture
     }
 
     return Date(timeIntervalSince1970: dataAccessExpirationDate)
+  }
+
+  private func timeInterval(from value: Any?) -> TimeInterval? {
+    // Graph responses contain numbers, whereas login URL query values are strings.
+    guard let interval = (value as? TimeInterval) ?? (value as? String).flatMap({ TimeInterval($0) }),
+          interval.isFinite else {
+      return nil
+    }
+    return interval
   }
 
   func challenge(from parameters: [String: Any]) -> String? {
