@@ -77,6 +77,7 @@ static dispatch_queue_t FBSDKTimeSpentDataWriteQueue(void) {
 @property (nonatomic) NSTimeInterval lastSuspendTime;
 @property (nonatomic) BOOL shouldLogActivateEvent;
 @property (nonatomic) BOOL shouldLogDeactivateEvent;
+@property (nonatomic, copy) NSString *suspendedSessionData;
 
 @end
 
@@ -138,6 +139,9 @@ static dispatch_queue_t FBSDKTimeSpentDataWriteQueue(void) {
   };
 
   NSString *content = [FBSDKBasicUtility JSONStringForObject:timeSpentData error:NULL invalidObjectHandler:NULL];
+  // Complete the lifecycle transition before dispatching persistence work.
+  self.suspendedSessionData = content;
+  self.isCurrentlyLoaded = NO;
 
   __block UIBackgroundTaskIdentifier bgTask = UIBackgroundTaskInvalid;
   bgTask = [UIApplication.sharedApplication beginBackgroundTaskWithExpirationHandler:^{
@@ -158,10 +162,6 @@ static dispatch_queue_t FBSDKTimeSpentDataWriteQueue(void) {
       [UIApplication.sharedApplication endBackgroundTask:bgTask];
       bgTask = UIBackgroundTaskInvalid;
     }
-
-    dispatch_async(dispatch_get_main_queue(), ^{
-      self.isCurrentlyLoaded = NO;
-    });
   });
 }
 
@@ -181,10 +181,14 @@ static dispatch_queue_t FBSDKTimeSpentDataWriteQueue(void) {
   // just restore persisted data the first time.
   if (!self.isCurrentlyLoaded) {
     NSTimeInterval now = round([NSDate date].timeIntervalSince1970);
-    NSString *content =
-    [[NSString alloc] initWithContentsOfFile:[FBSDKBasicUtility persistenceFilePath:FBSDKTimeSpentFilename]
-                                usedEncoding:nil
-                                       error:nil];
+    // A foreground transition may arrive before the asynchronous write finishes.
+    // Use the latest snapshot in this process instead of re-reading an older file.
+    NSString *content = self.suspendedSessionData;
+    if (!content) {
+      content = [[NSString alloc] initWithContentsOfFile:[FBSDKBasicUtility persistenceFilePath:FBSDKTimeSpentFilename]
+                                          usedEncoding:nil
+                                                 error:nil];
+    }
 
     if (!content) {
       // Nothing persisted, so this is the first launch.

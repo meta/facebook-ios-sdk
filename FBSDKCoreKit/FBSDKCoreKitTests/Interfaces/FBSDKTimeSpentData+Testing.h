@@ -16,10 +16,19 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonnull, nonatomic) id<FBSDKServerConfigurationProviding> serverConfigurationProvider;
 @property (nonatomic) NSString *sourceApplication;
 @property (nonatomic) BOOL isOpenedFromAppLink;
+@property (nonatomic) BOOL isCurrentlyLoaded;
+@property (nonatomic) NSTimeInterval lastRestoreTime;
+@property (nonatomic) NSTimeInterval secondsSpentInCurrentSession;
+@property (nonatomic) int numInterruptionsInCurrentSession;
+@property (nonatomic) NSString *sessionID;
+@property (nonatomic) NSTimeInterval lastSuspendTime;
 
 - (NSString *)getSourceApplication;
 - (void)resetSourceApplication;
 - (NSDictionary<NSString *, id> *)appEventsParametersForDeactivate;
+- (void)suspendTimeSpentData NS_SWIFT_NAME(suspendTimeSpentData());
+- (void)restoreTimeSpendDataWithCalledFromActivateApp:(BOOL)calledFromActivateApp
+    NS_SWIFT_NAME(restoreTimeSpentData(calledFromActivateApp:));
 
 @end
 
