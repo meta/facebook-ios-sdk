@@ -66,9 +66,10 @@ Register the app's bundle identifier in your Meta app settings. Configure
 URL scheme (`fb` followed by your app ID) in the application's `Info.plist`, as
 described in the [iOS getting-started guide](https://developers.facebook.com/docs/ios/getting-started).
 For native app switching, include the query schemes required by the selected
-features in `LSApplicationQueriesSchemes`: `fbapi` for Facebook and
-`fb-messenger-share-api` for Messenger sharing. These are query schemes, not the
-app's own `fb<APP_ID>` callback URL scheme.
+features in `LSApplicationQueriesSchemes`: both `fbapi` and `fbauth2` for
+Facebook Login, `fbapi` for Facebook sharing, and `fb-messenger-share-api` for
+Messenger sharing. These are query schemes, not the app's own `fb<APP_ID>`
+callback URL scheme.
 Do not put an app secret in the client. Installation and callback wiring do not
 replace Login permissions, consent, or token-handling requirements.
 
