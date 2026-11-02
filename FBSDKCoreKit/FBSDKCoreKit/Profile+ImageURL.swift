@@ -31,13 +31,19 @@ extension Profile {
   /**
    A convenience method for returning a complete `URL` for retrieving the user's profile image.
 
+   For limited-login profiles, returns the existing `imageURL` without applying the requested
+   picture mode or size. Returns `nil` when the profile has no image URL.
+
    - Parameters:
      - pictureMode: The picture mode.
      - size: The height and width. This will be rounded to integer precision.
    */
   @objc(imageURLForPictureMode:size:)
   public func imageURL(forMode pictureMode: PictureMode, size: CGSize) -> URL? {
-    Self.getImageURL(profileID: userID, pictureMode: pictureMode, size: size)
+    if isLimited {
+      return imageURL
+    }
+    return Self.getImageURL(profileID: userID, pictureMode: pictureMode, size: size)
   }
 
   static func getImageURL(
