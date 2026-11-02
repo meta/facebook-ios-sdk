@@ -45,6 +45,16 @@ extension IAPTransactionObserverTests {
     IAPTransactionObserver.shared.stopObserving()
   }
 
+  func testStopCancelsStoreKit2Listener() async throws {
+    IAPTransactionObserver.shared.startObserving()
+    let task = try XCTUnwrap(IAPTransactionObserver.shared.transactionListenerTaskForTesting)
+    IAPTransactionObserver.shared.stopObserving()
+    XCTAssertTrue(task.isCancelled)
+    // Ensure the pre-fix listener also terminates instead of leaking out of this test.
+    task.cancel()
+    await task.value
+  }
+
   func testObserveRestoredPurchases() async {
     IAPTransactionObserver.shared.setReleaseDate(Date())
     guard let products =
