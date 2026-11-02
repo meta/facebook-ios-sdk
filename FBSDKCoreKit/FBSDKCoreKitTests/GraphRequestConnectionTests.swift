@@ -1779,6 +1779,41 @@ final class GraphRequestConnectionTests: XCTestCase, GraphRequestConnectionDeleg
 
   // MARK: - Error recovery.
 
+  func testRecoverableErrorWithoutAttempterCompletesRequest() throws {
+    let expectation = expectation(description: "The request completes without a recovery attempter")
+    settings.isGraphErrorRecoveryEnabled = true
+    let token = SampleAccessTokens.validToken
+    TestAccessTokenWallet.current = token
+    errorConfiguration.stubbedRecoveryConfiguration = _ErrorRecoveryConfiguration(
+      recoveryDescription: "Recovery Description",
+      optionDescriptions: ["Option"],
+      category: .recoverable,
+      recoveryActionName: "unavailable"
+    )
+    let request = TestGraphRequest(graphPath: "1234", tokenString: token.tokenString)
+    var completionCallCount = 0
+    var capturedError: NSError?
+    connection.add(request) { _, result, error in
+      completionCallCount += 1
+      XCTAssertNil(result)
+      capturedError = error as NSError?
+      expectation.fulfill()
+    }
+    connection.start()
+
+    let response = HTTPURLResponse(url: sampleUrl, statusCode: 400, httpVersion: nil, headerFields: nil)
+    let completion = try XCTUnwrap(session.capturedCompletion)
+    completion(missingTokenData, response, nil)
+    wait(for: [expectation], timeout: 1)
+
+    XCTAssertEqual(completionCallCount, 1)
+    let error = try XCTUnwrap(capturedError)
+    XCTAssertEqual(error.userInfo[GraphRequestErrorGraphErrorCodeKey] as? Int, 190)
+    XCTAssertNil(error.userInfo[NSRecoveryAttempterErrorKey])
+    XCTAssertNil(TestAccessTokenWallet.current)
+    XCTAssertNil(secondSession.capturedCompletion, "Should not retry without a recovery attempter")
+  }
+
   func testRetryWithTransientError() throws {
     let expectation = expectation(description: name)
 
