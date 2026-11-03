@@ -22,7 +22,14 @@ public final class _BridgeAPIProtocolNativeV1: NSObject, BridgeAPIProtocol {
   let shouldIncludeAppIcon: Bool
   let pasteboard: _Pasteboard?
   static let defaultMaxBase64DataLengthThreshold: UInt = 1024 * 16
-  private var observer: Any?
+
+  private struct PasteboardObservation {
+    let identifier: UUID
+    let notificationDeliverer: NotificationDelivering
+    let token: NSObjectProtocol
+  }
+
+  private var pasteboardObservation: PasteboardObservation?
 
   var appIcon: UIImage? {
     guard
@@ -105,7 +112,7 @@ public final class _BridgeAPIProtocolNativeV1: NSObject, BridgeAPIProtocol {
   }
 
   deinit {
-    Self.notificationDeliverer?.fb_removeObserver(observer as Any)
+    removePasteboardObserver()
   }
 
   public func requestURL(
@@ -267,22 +274,43 @@ public final class _BridgeAPIProtocolNativeV1: NSObject, BridgeAPIProtocol {
   }
 
   private func clearPasteboardDataOnActivation(matching data: Data) {
+    removePasteboardObserver()
     guard
       let notificationDeliverer = try? Self.getDependencies().notificationDeliverer
     else {
       return
     }
 
-    observer = notificationDeliverer.fb_addObserver(
+    let identifier = UUID()
+    let token = notificationDeliverer.fb_addObserver(
       forName: .FBSDKApplicationDidBecomeActive,
       object: nil,
       queue: nil
-    ) { _ in
+    ) { [weak self] _ in
+      // A removed registration may already have a callback queued for delivery.
+      guard let self = self,
+            self.pasteboardObservation?.identifier == identifier else {
+        return
+      }
+      self.removePasteboardObserver()
       let pasteboardData = self.pasteboard?.data(forPasteboardType: PasteboardKeys.pasteboard)
       if data == pasteboardData {
         self.pasteboard?.setData(Data(), forPasteboardType: PasteboardKeys.pasteboard)
       }
     }
+    pasteboardObservation = PasteboardObservation(
+      identifier: identifier,
+      notificationDeliverer: notificationDeliverer,
+      token: token
+    )
+  }
+
+  private func removePasteboardObserver() {
+    guard let observation = pasteboardObservation else {
+      return
+    }
+    pasteboardObservation = nil
+    observation.notificationDeliverer.fb_removeObserver(observation.token)
   }
 }
 
