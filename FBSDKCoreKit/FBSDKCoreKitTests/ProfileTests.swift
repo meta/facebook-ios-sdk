@@ -147,6 +147,40 @@ final class ProfileTests: XCTestCase {
 
   // MARK: - Creating Image URL
 
+  func testCreatingImageURLForLimitedProfileUsesExistingURL() {
+    profile = SampleUserProfiles.validLimited
+    settings.clientToken = validClientToken
+    TestAccessTokenWallet.current = SampleAccessTokens.validToken
+
+    let modes: [Profile.PictureMode] = [.square, .normal, .album, .small, .large]
+    let sizes = [
+      CGSize(width: 640, height: 480),
+      CGSize(width: CGFloat.nan, height: 480),
+      CGSize(width: 640, height: CGFloat.infinity),
+    ]
+    for mode in modes {
+      for size in sizes {
+        XCTAssertEqual(profile.imageURL(forMode: mode, size: size), profile.imageURL)
+      }
+    }
+    XCTAssertNil(urlHoster.capturedPath)
+  }
+
+  func testCreatingImageURLForLimitedProfileWithoutImageReturnsNil() {
+    profile = SampleUserProfiles.createValid(imageURL: nil, isLimited: true)
+    settings.clientToken = validClientToken
+
+    XCTAssertNil(profile.imageURL(forMode: .large, size: Self.validSquareSize))
+    XCTAssertNil(urlHoster.capturedPath)
+  }
+
+  func testLimitedProfileImageURLDoesNotRequireGraphDependencies() {
+    profile = SampleUserProfiles.validLimited
+    Profile.resetDependencies()
+
+    XCTAssertEqual(profile.imageURL(forMode: .normal, size: Self.validSquareSize), profile.imageURL)
+  }
+
   func testCreatingImageURL() throws {
     try makeImageURL()
     if _DomainHandler.sharedInstance().isDomainHandlingEnabled() {
