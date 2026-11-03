@@ -76,8 +76,9 @@ extension IAPTransactionObserver: _TransactionObserving {
 // MARK: - Store Kit 2
 
 extension IAPTransactionObserver {
-  private var transactionListenerTask: Task<Void, Error>? {
-    anyTransactionListenerTask as? Task<Void, Error>
+  // The listener catches sleep cancellation, so the stored task is nonthrowing.
+  private var transactionListenerTask: Task<Void, Never>? {
+    anyTransactionListenerTask as? Task<Void, Never>
   }
 
   private func checkForRestoredPurchases() async {
@@ -250,6 +251,10 @@ extension IAPTransactionObserver {
 
   func setReleaseDate(_ date: Date) {
     releaseDate = date
+  }
+
+  var transactionListenerTaskForTesting: Task<Void, Never>? {
+    anyTransactionListenerTask as? Task<Void, Never>
   }
 
   var configuredObservationTime: UInt64 {
