@@ -118,6 +118,20 @@ final class GraphErrorRecoveryProcessorTests: XCTestCase {
     )
   }
 
+  func testProcessingRecoverableErrorWithoutRecoveryAttempter() {
+    let error = NSError(
+      domain: "test",
+      code: SampleErrors.recoverableCode,
+      userInfo: [Keys.errorKey: SampleErrors.recoverableCode]
+    )
+
+    XCTAssertFalse(
+      processor.processError(error, request: createGraphRequest(tokenString: "Foo"), delegate: delegate),
+      "Should leave errors without a recovery attempter for the caller to handle"
+    )
+    XCTAssertFalse(delegate.wasRecoveryAttempted)
+  }
+
   // MARK: - Helpers
 
   func createGraphRequest(tokenString: String) -> GraphRequestProtocol {
