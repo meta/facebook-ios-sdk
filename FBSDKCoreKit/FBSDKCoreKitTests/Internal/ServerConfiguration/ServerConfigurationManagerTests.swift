@@ -8,6 +8,7 @@
 
 @testable import FBSDKCoreKit
 
+import TestTools
 import XCTest
 
 final class ServerConfigurationManagerTests: XCTestCase {
@@ -19,8 +20,28 @@ final class ServerConfigurationManagerTests: XCTestCase {
   var dialogConfigurationMapBuilder: TestDialogConfigurationMapBuilder!
   // swiftlint:enable implicitly_unwrapped_optional
 
+  private var originalAppID: String?
+  private var originalSettingsDependencies: Settings.ObjectDependencies?
+
   override func setUp() {
     super.setUp()
+
+    originalAppID = Settings.shared.appID
+    originalSettingsDependencies = Settings.shared.configuredDependencies
+    Settings.shared.setDependencies(
+      .init(
+        appEventsConfigurationProvider: TestAppEventsConfigurationProvider(),
+        serverConfigurationProvider: TestAppEventsServerConfigurationProvider(),
+        dataStore: UserDefaultsSpy(),
+        eventLogger: TestEventLogger(),
+        infoDictionaryProvider: TestBundle()
+      )
+    )
+    Settings.shared.appID = name
+    _ServerConfigurationManager.shared.clearCache()
+    _ServerConfigurationManager.shared.setValue(NSMutableArray(), forKey: "completionBlocks")
+    _ServerConfigurationManager.shared.setValue(false, forKey: "loadingServerConfiguration")
+    _ServerConfigurationManager.shared.setValue(false, forKey: "requeryFinishedForAppStart")
 
     connection = TestGraphRequestConnection()
     requestFactory = TestGraphRequestFactory()
@@ -35,6 +56,11 @@ final class ServerConfigurationManagerTests: XCTestCase {
 
   override func tearDown() {
     _ServerConfigurationManager.shared.reset()
+    _ServerConfigurationManager.shared.setValue(NSMutableArray(), forKey: "completionBlocks")
+    _ServerConfigurationManager.shared.setValue(false, forKey: "loadingServerConfiguration")
+    _ServerConfigurationManager.shared.setValue(false, forKey: "requeryFinishedForAppStart")
+    Settings.shared.appID = originalAppID
+    Settings.shared.configuredDependencies = originalSettingsDependencies
     connection = nil
     requestFactory = nil
     connectionFactory = nil
@@ -175,7 +201,182 @@ final class ServerConfigurationManagerTests: XCTestCase {
     }
   }
 
+  func testFailedLoadDoesNotRetryForRepeatedCacheReads() throws {
+    _ = try failInitialLoad()
+
+    for _ in 0 ..< 5 {
+      XCTAssertTrue(_ServerConfigurationManager.shared.cachedServerConfiguration().isDefaults)
+    }
+
+    XCTAssertEqual(connection.startCallCount, 1)
+  }
+
+  func testFailedLoadReturnsCachedErrorToSubsequentCompletions() throws {
+    let expectedError = try failInitialLoad()
+    var completionCount = 0
+
+    for _ in 0 ..< 5 {
+      _ServerConfigurationManager.shared.loadServerConfiguration { configuration, error in
+        completionCount += 1
+        XCTAssertNil(configuration)
+        XCTAssertEqual(error as NSError?, expectedError)
+      }
+    }
+
+    XCTAssertEqual(completionCount, 5)
+    XCTAssertEqual(connection.startCallCount, 1)
+  }
+
+  func testFailedRefreshReturnsPreviousConfigurationDuringCooldown() throws {
+    let configuration = ServerConfigurationFixtures.configuration(withDictionary: [
+      "appID": name,
+      "timestamp": Date.distantPast,
+      "defaults": false,
+    ])
+    _ServerConfigurationManager.shared.setValue(configuration, forKey: "serverConfiguration")
+    let expectedError = try failInitialLoad()
+    var didComplete = false
+
+    _ServerConfigurationManager.shared.loadServerConfiguration { result, error in
+      didComplete = true
+      XCTAssertIdentical(result, configuration)
+      XCTAssertEqual(error as NSError?, expectedError)
+    }
+
+    XCTAssertTrue(didComplete)
+    XCTAssertIdentical(_ServerConfigurationManager.shared.cachedServerConfiguration(), configuration)
+    XCTAssertEqual(connection.startCallCount, 1)
+  }
+
+  func testFailedLoadRetriesAfterCooldownExpires() throws {
+    _ = try failInitialLoad()
+    expireErrorCooldown()
+    var didComplete = false
+
+    _ServerConfigurationManager.shared.loadServerConfiguration { configuration, error in
+      didComplete = true
+      XCTAssertNotNil(configuration)
+      XCTAssertNil(error)
+    }
+
+    XCTAssertEqual(connection.startCallCount, 2)
+    XCTAssertFalse(didComplete)
+    let completion = try XCTUnwrap(connection.capturedCompletion)
+    completion(connection, [String: Any](), nil)
+    XCTAssertTrue(didComplete)
+    _ = _ServerConfigurationManager.shared.cachedServerConfiguration()
+    XCTAssertEqual(connection.startCallCount, 2)
+  }
+
+  func testClearCacheAllowsRetryAfterFailure() throws {
+    _ = try failInitialLoad()
+    _ServerConfigurationManager.shared.clearCache()
+
+    _ServerConfigurationManager.shared.loadServerConfiguration(completionBlock: nil)
+
+    XCTAssertEqual(connection.startCallCount, 2)
+    XCTAssertNotNil(_ServerConfigurationManager.shared.request(toLoadServerConfiguration: name))
+  }
+
+  func testRetryAfterExpiryCoalescesCompletionBlocks() throws {
+    _ = try failInitialLoad()
+    expireErrorCooldown()
+    var completionCount = 0
+
+    for _ in 0 ..< 2 {
+      _ServerConfigurationManager.shared.loadServerConfiguration { configuration, error in
+        completionCount += 1
+        XCTAssertNotNil(configuration)
+        XCTAssertNil(error)
+      }
+    }
+
+    XCTAssertEqual(connection.startCallCount, 2)
+    XCTAssertEqual(completionCount, 0)
+    let completion = try XCTUnwrap(connection.capturedCompletion)
+    completion(connection, [String: Any](), nil)
+    XCTAssertEqual(completionCount, 2)
+  }
+
+  func testFailureWithoutConfigurationDoesNotThrottleAnotherApp() throws {
+    _ = try failInitialLoad()
+    let otherAppID = "other-" + name
+    Settings.shared.appID = otherAppID
+
+    _ServerConfigurationManager.shared.loadServerConfiguration(completionBlock: nil)
+
+    XCTAssertEqual(connection.startCallCount, 2)
+    XCTAssertEqual(connection.capturedRequest?.graphPath, otherAppID)
+  }
+
+  func testSuccessfulConfigurationRemainsCached() throws {
+    _ServerConfigurationManager.shared.loadServerConfiguration(completionBlock: nil)
+    let completion = try XCTUnwrap(connection.capturedCompletion)
+    completion(connection, [String: Any](), nil)
+    let configuration = _ServerConfigurationManager.shared.cachedServerConfiguration()
+    var didComplete = false
+
+    _ServerConfigurationManager.shared.loadServerConfiguration { result, error in
+      didComplete = true
+      XCTAssertIdentical(result, configuration)
+      XCTAssertNil(error)
+    }
+
+    XCTAssertTrue(didComplete)
+    XCTAssertEqual(connection.startCallCount, 1)
+  }
+
+  func testFailureCooldownAppliesToRequestBuilder() throws {
+    _ = try failInitialLoad()
+
+    XCTAssertNil(_ServerConfigurationManager.shared.request(toLoadServerConfiguration: name))
+    XCTAssertNotNil(_ServerConfigurationManager.shared.request(toLoadServerConfiguration: "other-" + name))
+
+    expireErrorCooldown()
+    XCTAssertNotNil(_ServerConfigurationManager.shared.request(toLoadServerConfiguration: name))
+  }
+
+  func testFailureCooldownPreventsConfigurationPiggyback() throws {
+    _ = try failInitialLoad()
+    let settings = TestSettings()
+    settings.appID = name
+    let piggybackManager = GraphRequestPiggybackManager()
+    piggybackManager.setDependencies(
+      .init(
+        graphRequestFactory: requestFactory,
+        serverConfigurationProvider: _ServerConfigurationManager.shared,
+        settings: settings,
+        tokenWallet: TestAccessTokenWallet.self
+      )
+    )
+    TestAccessTokenWallet.reset()
+    defer { TestAccessTokenWallet.reset() }
+    let otherConnection = TestGraphRequestConnection()
+    otherConnection.add(SampleGraphRequests.valid) { _, _, _ in }
+
+    piggybackManager.addPiggybackRequests(otherConnection)
+
+    XCTAssertEqual(otherConnection.capturedRequests.count, 1)
+    XCTAssertEqual(connection.startCallCount, 1)
+  }
+
   // MARK: - Helpers
+
+  private func failInitialLoad() throws -> NSError {
+    let error = SampleError() as NSError
+    _ServerConfigurationManager.shared.loadServerConfiguration(completionBlock: nil)
+    let completion = try XCTUnwrap(connection.capturedCompletion)
+    completion(connection, nil, error)
+    XCTAssertEqual(connection.startCallCount, 1)
+    return error
+  }
+
+  private func expireErrorCooldown() {
+    _ServerConfigurationManager.shared.setValue(
+      Date(timeIntervalSinceNow: -TimeInterval(FBSDK_SERVER_CONFIGURATION_MANAGER_CACHE_TIMEOUT) - 1),
+      forKey: "serverConfigurationErrorTimestamp"
+    )
+  }
 
   func assertEqualRawDialogConfigurations(
     _ actual: [String: Any],

@@ -12,6 +12,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 [Full Changelog](https://github.com/meta/facebook-ios-sdk/compare/v19.0.1...HEAD)
 
+### Fixed
+- Server configuration loads now reuse recent failures for up to one hour instead of immediately
+  starting new requests. Existing configuration remains available during the retry cooldown.
+
 ## 19.0.1
 
 [2026-10-30](https://github.com/meta/facebook-ios-sdk/releases/tag/v19.0.1) |

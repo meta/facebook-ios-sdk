@@ -51,6 +51,7 @@
 @property (nonatomic) FBSDKServerConfiguration *serverConfiguration;
 @property (nonatomic) NSError *serverConfigurationError;
 @property (nonatomic) NSDate *serverConfigurationErrorTimestamp;
+@property (nonatomic, copy) NSString *serverConfigurationErrorAppID;
 @property (nonatomic) BOOL requeryFinishedForAppStart;
 
 @end
@@ -107,6 +108,7 @@ typedef NS_OPTIONS(NSUInteger, FBSDKServerConfigurationManagerAppEventsFeatures)
     self.serverConfiguration = nil;
     self.serverConfigurationError = nil;
     self.serverConfigurationErrorTimestamp = nil;
+    self.serverConfigurationErrorAppID = nil;
   }
   NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
   NSString *defaultsKey = [NSString stringWithFormat:FBSDK_SERVER_CONFIGURATION_USER_DEFAULTS_KEY, FBSDKSettings.sharedSettings.appID];
@@ -133,10 +135,15 @@ typedef NS_OPTIONS(NSUInteger, FBSDKServerConfigurationManagerAppEventsFeatures)
     NSString *appID = FBSDKSettings.sharedSettings.appID;
     @synchronized(self) {
       // validate the cached configuration has the correct appID
-      if (self.serverConfiguration && ![self.serverConfiguration.appID isEqualToString:appID]) {
+      BOOL errorIsForDifferentAppID = self.serverConfigurationError
+        && self.serverConfigurationErrorAppID != appID
+        && ![self.serverConfigurationErrorAppID isEqualToString:appID];
+      if ((self.serverConfiguration && ![self.serverConfiguration.appID isEqualToString:appID])
+          || errorIsForDifferentAppID) {
         self.serverConfiguration = nil;
         self.serverConfigurationError = nil;
         self.serverConfigurationErrorTimestamp = nil;
+        self.serverConfigurationErrorAppID = nil;
       }
 
       // load the configuration from NSUserDefaults
@@ -162,9 +169,11 @@ typedef NS_OPTIONS(NSUInteger, FBSDKServerConfigurationManagerAppEventsFeatures)
         }
       }
 
-      if (self.requeryFinishedForAppStart
-          && ((self.serverConfiguration && [self _serverConfigurationTimestampIsValid:self.serverConfiguration.timestamp] && self.serverConfiguration.version >= FBSDKServerConfigurationVersion))) {
-        // we have a valid server configuration, use that
+      if ([self _serverConfigurationErrorIsValidForAppID:appID]
+          || (self.requeryFinishedForAppStart
+              && self.serverConfiguration && [self _serverConfigurationTimestampIsValid:self.serverConfiguration.timestamp]
+              && self.serverConfiguration.version >= FBSDKServerConfigurationVersion)) {
+        // Reuse a valid configuration or the latest failure during the retry cooldown.
         loadBlock = [self _wrapperBlockForLoadBlock:completionBlock];
       } else {
         // hold onto the completion block
@@ -278,6 +287,10 @@ typedef NS_OPTIONS(NSUInteger, FBSDKServerConfigurationManagerAppEventsFeatures)
 
 - (id<FBSDKGraphRequest>)requestToLoadServerConfiguration:(NSString *)appID
 {
+  if ([self _serverConfigurationErrorIsValidForAppID:appID]) {
+    return nil;
+  }
+
   NSOperatingSystemVersion operatingSystemVersion = [FBSDKInternalUtility.sharedUtility operatingSystemVersion];
   NSString *osVersion = [NSString stringWithFormat:@"%ti.%ti.%ti",
                          operatingSystemVersion.majorVersion,
@@ -342,10 +355,12 @@ typedef NS_OPTIONS(NSUInteger, FBSDKServerConfigurationManagerAppEventsFeatures)
       }
       _serverConfigurationError = error;
       _serverConfigurationErrorTimestamp = [NSDate date];
+      _serverConfigurationErrorAppID = [appID copy];
     } else {
       _serverConfiguration = serverConfiguration;
       _serverConfigurationError = nil;
       _serverConfigurationErrorTimestamp = nil;
+      _serverConfigurationErrorAppID = nil;
 
     #if DEBUG
       NSString *updateMessage = _serverConfiguration.updateMessage;
@@ -385,6 +400,16 @@ typedef NS_OPTIONS(NSUInteger, FBSDKServerConfigurationManagerAppEventsFeatures)
     return [self.dialogConfigurationMapBuilder buildDialogConfigurationMapWithRawConfigurations:dialogConfigurationsArray];
   } else {
     return @{};
+  }
+}
+
+- (BOOL)_serverConfigurationErrorIsValidForAppID:(NSString *)appID
+{
+  @synchronized(self) {
+    return self.serverConfigurationError
+    && self.serverConfigurationErrorTimestamp
+    && (self.serverConfigurationErrorAppID == appID || [self.serverConfigurationErrorAppID isEqualToString:appID])
+    && [self _serverConfigurationTimestampIsValid:self.serverConfigurationErrorTimestamp];
   }
 }
 
