@@ -52,3 +52,5 @@ Pod::Spec.new do |s|
     s.vendored_frameworks = 'XCFrameworks/FBAEMKit.xcframework'
     s.dependency 'FBSDKCoreKit_Basics', "#{s.version}"
   end
+
+this is my suggestion
