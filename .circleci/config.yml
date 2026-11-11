@@ -53,7 +53,7 @@ commands:
             --repository ${CIRCLE_PROJECT_REPONAME}  \
             --commitish ${CIRCLE_SHA1} \
             --name "Facebook SDK ${CIRCLE_TAG}" \
-            --body "Consult [Changelog](https://github.com/facebook/facebook-ios-sdk/blob/main/CHANGELOG.md#${STRIPPED_VERSION_NUMBER})" \
+            --body "Consult [Changelog](https://github.com/meta/facebook-ios-sdk/blob/main/CHANGELOG.md#${STRIPPED_VERSION_NUMBER})" \
             --draft \
             ${CIRCLE_TAG}
 

@@ -5,7 +5,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 """
-Spam issue triage for facebook/facebook-ios-sdk.
+Spam issue triage for meta/facebook-ios-sdk.
 
 Deterministic (no LLM). Designed for PRECISION first: a wrongly-closed real bug
 is far worse than leaving a spam issue open one more day.

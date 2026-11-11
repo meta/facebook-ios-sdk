@@ -1,9 +1,8 @@
 # Facebook SDK for iOS
 
-[![Platforms](https://img.shields.io/cocoapods/p/FBSDKCoreKit.svg)](https://cocoapods.org/pods/FBSDKCoreKit)
-[![circleci](https://circleci.com/gh/facebook/facebook-ios-sdk/tree/main.svg?style=shield)](https://circleci.com/gh/facebook/facebook-ios-sdk/tree/main)
+[![Platforms](https://img.shields.io/badge/platform-iOS-lightgrey.svg)](https://developers.facebook.com/docs/ios)
 
-[![CocoaPods](https://img.shields.io/cocoapods/v/FBSDKCoreKit.svg)](https://cocoapods.org/pods/FBSDKCoreKit)
+[![Swift Package Manager compatible](https://img.shields.io/badge/SPM-compatible-4BC51D.svg?style=flat)](https://swift.org/package-manager/)
 [![Carthage compatible](https://img.shields.io/badge/Carthage-compatible-4BC51D.svg?style=flat)](https://github.com/Carthage/Carthage)
 
 This open-source library allows you to integrate Facebook into your iOS app.
@@ -15,17 +14,46 @@ Please take a moment and [subscribe to releases](https://docs.github.com/en/ente
 
 |:warning: Be Advised :warning:|
 |:---|
+|<p>**CocoaPods is no longer supported, starting with v19.0.1.** The CocoaPods Specs repo is [becoming read-only](https://blog.cocoapods.org/CocoaPods-Specs-Repo/), so v19.0.0 is the last version of the Facebook SDK published to CocoaPods. Future releases, including bug fixes, will not be published to CocoaPods.</p><p>Existing CocoaPods integrations will keep working on v19.0.0 and earlier, but will not receive updates. Please migrate to Swift Package Manager. See [Migrating from CocoaPods](#migrating-from-cocoapods).</p>|
+
+|:warning: Be Advised :warning:|
+|:---|
 |<p>We have begun rewriting the iOS SDK in Swift in order to modernize the code base.</p><p>Please monitor the changelog for updates to existing interfaces but keep in mind that some interfaces will be unstable during this process. As such, updating to a minor version may introduce compilation issues related to language interoperability. Using symbols now defined in Swift may require using `@import` syntax from Objective-C and using C++ will likely require workarounds like creating wrappers in Objective-C.</p>Please bear with us as we work towards providing an improved experience for integrating with the Facebook platform.|
 
 ## TRY IT OUT
 
 ### Swift Package Manager
 
-1. In Xcode, select File > Swift Packages > Add Package Dependency.
-1. Follow the prompts using the URL for this repository
+1. In Xcode, select File > Add Package Dependencies.
+1. Enter the URL for this repository: `https://github.com/meta/facebook-ios-sdk`
 1. Select the `Facebook`-prefixed libraries you want to use
 1. Check-out the tutorials available online at: <https://developers.facebook.com/docs/ios/getting-started>
 1. Start coding! Visit <https://developers.facebook.com/docs/ios> for tutorials and reference documentation.
+
+### Migrating from CocoaPods
+
+CocoaPods is not supported starting with v19.0.1. To keep receiving updates, move to Swift Package Manager:
+
+1. Remove the Facebook SDK pods (`FBSDKCoreKit`, `FBSDKLoginKit`, etc.) from your `Podfile`.
+1. Run `pod install`. If the Facebook SDK was your only pod, run `pod deintegrate` instead and open your `.xcodeproj` from now on instead of the `.xcworkspace`.
+1. In Xcode, select File > Add Package Dependencies and enter `https://github.com/meta/facebook-ios-sdk`.
+1. Choose the "Up to Next Major Version" rule, starting from `19.0.1`.
+1. Add the libraries that match the pods you removed:
+
+   | CocoaPods pod | Swift Package Manager library |
+   |:---|:---|
+   | `FBSDKCoreKit` | `FacebookCore` |
+   | `FBSDKLoginKit` | `FacebookLogin` |
+   | `FBSDKShareKit` | `FacebookShare` |
+   | `FBSDKGamingServicesKit` | `FacebookGamingServices` |
+   | `FBAEMKit` | `FacebookAEM` |
+   | `FBSDKCoreKit_Basics` | `FacebookBasics` |
+
+1. Clean the build folder (Product > Clean Build Folder) and rebuild.
+
+Your existing imports, such as `import FBSDKCoreKit` and `@import FBSDKCoreKit;`, do not need to change.
+
+If you can't use Swift Package Manager, you can download prebuilt XCFrameworks for each version from the [Releases](https://github.com/meta/facebook-ios-sdk/releases) page and add them to your project manually.
 
 ## FRAMEWORK ARCHITECTURES
 
