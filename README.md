@@ -55,6 +55,26 @@ Your existing imports, such as `import FBSDKCoreKit` and `@import FBSDKCoreKit;`
 
 If you can't use Swift Package Manager, you can download prebuilt XCFrameworks for each version from the [Releases](https://github.com/meta/facebook-ios-sdk/releases) page and add them to your project manually.
 
+## FRAMEWORK ARCHITECTURES
+
+Source builds use standard architectures (`ARCHS = $(ARCHS_STANDARD)` in `Configurations/Common.xcconfig` and `Configurations/FacebookSDK-Project.xcconfig`). A default device build is `arm64`. Simulator builds keep the standard simulator architectures selected by Xcode.
+
+To include an `arm64e` device slice, rebuild with an explicit override:
+
+```sh
+xcodebuild ... ARCHS="arm64 arm64e"
+```
+
+Rebuilding with that override produces new local binaries. The XCFrameworks already published for remote Swift Package Manager stay at the versions attached to the current release. Remote package users receive the updated architecture layout after maintainers rebuild and publish new release artifacts.
+
+Check a locally assembled XCFramework with:
+
+```sh
+./scripts/test_framework_architectures.py path/to/Kit.xcframework
+```
+
+The checker requires each iOS device library to be exactly `arm64`, so an opt-in `arm64`/`arm64e` build fails this default check. Simulator libraries are classified from the XCFramework metadata and must match the architectures recorded there.
+
 ## iOS 14 CHANGES
 
 ### Data Disclosure

@@ -10,8 +10,9 @@
 // Disable legacy-compatible header searching
 ALWAYS_SEARCH_USER_PATHS = NO
 
-// Architectures to build
-ARCHS = $(ARCHS_STANDARD) arm64e
+// Architectures to build. Device slices follow ARCHS_STANDARD (arm64).
+// Opt into arm64e with a custom build: ARCHS="arm64 arm64e"
+ARCHS = $(ARCHS_STANDARD)
 
 // Whether to enable module imports
 CLANG_ENABLE_MODULES = YES
