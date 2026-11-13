@@ -12,6 +12,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 [Full Changelog](https://github.com/meta/facebook-ios-sdk/compare/v19.0.1...HEAD)
 
+### Fixed
+- Released native bridge pasteboard cleanup observers after activation or replacement, preventing retained image payloads
+  and stale cleanup callbacks.
+
 ## 19.0.1
 
 [2026-10-30](https://github.com/meta/facebook-ios-sdk/releases/tag/v19.0.1) |
