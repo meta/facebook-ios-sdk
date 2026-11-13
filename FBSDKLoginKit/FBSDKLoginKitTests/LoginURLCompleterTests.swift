@@ -177,11 +177,118 @@ final class LoginURLCompleterTests: XCTestCase {
     verifyParameters(actual: urlCompleter.parameters, expected: parameters)
   }
 
-  func testInitWithStringExpirations() {
+  func testInitWithStringExpirations() throws {
     let parameters = SampleRawLoginCompletionParameters.withStringExpirations
+    let before = Date()
     urlCompleter = createLoginCompleter(parameters: parameters, appID: Values.appID)
+    let after = Date()
 
     verifyParameters(actual: urlCompleter.parameters, expected: parameters)
+    let expiration = try XCTUnwrap(urlCompleter.parameters.expirationDate)
+    let interval = TimeInterval(SampleRawLoginCompletionParameters.secondsInDay * 60)
+    XCTAssertGreaterThanOrEqual(expiration, before.addingTimeInterval(interval))
+    XCTAssertLessThanOrEqual(expiration, after.addingTimeInterval(interval))
+    XCTAssertEqual(
+      urlCompleter.parameters.dataAccessExpirationDate,
+      Date(timeIntervalSince1970: SampleRawLoginCompletionParameters.dataExpirationDate)
+    )
+  }
+
+  func testInitWithStringAbsoluteExpirations() {
+    for key in [Keys.expires, Keys.expiresAt] {
+      for (value, timestamp) in [("1700000000", 1700000000.0), ("1700000000.5", 1700000000.5)] {
+        let completer = createLoginCompleter(
+          parameters: [Keys.accessToken: Values.accessToken, key: value],
+          appID: Values.appID
+        )
+        XCTAssertEqual(
+          completer.parameters.expirationDate,
+          Date(timeIntervalSince1970: timestamp),
+          "Should parse \(key)=\(value)"
+        )
+      }
+    }
+  }
+
+  func testInitWithNumericExpirations() {
+    let timestamp = 1700000000.5
+    for key in [Keys.expires, Keys.expiresAt] {
+      let completer = createLoginCompleter(
+        parameters: [Keys.accessToken: Values.accessToken, key: timestamp],
+        appID: Values.appID
+      )
+      XCTAssertEqual(completer.parameters.expirationDate, Date(timeIntervalSince1970: timestamp))
+    }
+    XCTAssertEqual(
+      urlCompleter.dataAccessExpirationDateFrom(parameters: [Keys.dataAccessExpiration: timestamp]),
+      Date(timeIntervalSince1970: timestamp)
+    )
+    let before = Date()
+    let relative = urlCompleter.expirationDateFrom(parameters: [Keys.expiresIn: 60.5])
+    let after = Date()
+    XCTAssertGreaterThanOrEqual(relative, before.addingTimeInterval(60.5))
+    XCTAssertLessThanOrEqual(relative, after.addingTimeInterval(60.5))
+  }
+
+  func testExpirationPrecedence() {
+    let parameters: [String: Any] = [
+      Keys.expires: "1700000000",
+      Keys.expiresAt: 1800000000.0,
+      Keys.expiresIn: "60",
+    ]
+    XCTAssertEqual(
+      urlCompleter.expirationDateFrom(parameters: parameters),
+      Date(timeIntervalSince1970: 1700000000)
+    )
+    XCTAssertEqual(
+      urlCompleter.expirationDateFrom(parameters: [Keys.expiresAt: "1800000000", Keys.expiresIn: 60.0]),
+      Date(timeIntervalSince1970: 1800000000)
+    )
+    XCTAssertEqual(
+      urlCompleter.expirationDateFrom(parameters: [Keys.expires: "invalid", Keys.expiresAt: "1800000000"]),
+      Date(timeIntervalSince1970: 1800000000)
+    )
+  }
+
+  func testNonpositiveAbsoluteExpirationRetainsRelativeFallback() {
+    // A present nonpositive expires value has always suppressed expires_at.
+    let nonpositiveValues: [Any] = [0.0, "0", -1.0, "-1"]
+    for value in nonpositiveValues {
+      let before = Date()
+      let expiration = urlCompleter.expirationDateFrom(parameters: [
+        Keys.expires: value,
+        Keys.expiresAt: 1800000000.0,
+        Keys.expiresIn: 60.5,
+      ])
+      let after = Date()
+      XCTAssertGreaterThanOrEqual(expiration, before.addingTimeInterval(60.5))
+      XCTAssertLessThanOrEqual(expiration, after.addingTimeInterval(60.5))
+    }
+  }
+
+  func testInvalidAndNonfiniteExpirations() {
+    let values: [Any] = [
+      "", "invalid", "0", "-1", "nan", "inf", "-inf", "1e9999",
+      0.0, -1.0, Double.nan, Double.infinity, -Double.infinity, NSNull(),
+    ]
+    for key in [Keys.expires, Keys.expiresAt, Keys.expiresIn] {
+      for value in values {
+        XCTAssertEqual(
+          urlCompleter.expirationDateFrom(parameters: [key: value]),
+          Date.distantFuture,
+          "Should ignore invalid \(key)=\(value)"
+        )
+      }
+    }
+    for value in values {
+      XCTAssertEqual(
+        urlCompleter.dataAccessExpirationDateFrom(parameters: [Keys.dataAccessExpiration: value]),
+        Date.distantFuture,
+        "Should ignore invalid data-access expiration \(value)"
+      )
+    }
+    XCTAssertEqual(urlCompleter.expirationDateFrom(parameters: [:]), Date.distantFuture)
+    XCTAssertEqual(urlCompleter.dataAccessExpirationDateFrom(parameters: [:]), Date.distantFuture)
   }
 
   func testInitWithoutAccessTokenWithoutIDTokenWithoutCode() {
