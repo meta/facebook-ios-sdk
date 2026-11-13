@@ -69,6 +69,9 @@
     case FBSDKGraphRequestErrorRecoverable:
       if (request.tokenString && [request.tokenString isEqualToString:self.accessToken]) {
         self.recoveryAttempter = error.recoveryAttempter;
+        if (!self.recoveryAttempter) {
+          return NO;
+        }
         [self.recoveryAttempter attemptRecoveryFromError:error
                                        completionHandler:^(BOOL didRecover) {
                                          [delegate processorDidAttemptRecovery:self didRecover:didRecover error:error];

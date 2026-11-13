@@ -78,6 +78,7 @@ NS_SWIFT_NAME(GraphErrorRecoveryProcessor)
 
 /**
  Attempts to process the error, return YES if the error can be processed.
+ Returns NO for recoverable errors without a recovery attempter so the caller can handle the original error.
  @param error the error to process.
  @param request the related request that may be reissued.
  @param delegate the delegate that will be retained until recovery is complete.
