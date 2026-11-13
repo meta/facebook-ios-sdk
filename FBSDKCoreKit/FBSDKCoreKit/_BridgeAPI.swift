@@ -230,11 +230,14 @@ public final class _BridgeAPI: NSObject,
   }
 
   func cancelBridgeRequest() {
-    if let request = pendingRequest {
-      pendingRequestCompletionBlock?(BridgeAPIResponse(cancelledWith: request))
-    }
+    let request = pendingRequest
+    let completionBlock = pendingRequestCompletionBlock
     pendingRequest = nil
     pendingRequestCompletionBlock = nil
+
+    if let request = request {
+      completionBlock?(BridgeAPIResponse(cancelledWith: request))
+    }
   }
 }
 
