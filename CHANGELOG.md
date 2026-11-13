@@ -10,6 +10,9 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## Unreleased
 
+### Fixed
+- Preserve application delegate URL-handling return values when AEM uses block-based swizzling.
+
 [Full Changelog](https://github.com/meta/facebook-ios-sdk/compare/v19.0.1...HEAD)
 
 ## 19.0.1

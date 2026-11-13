@@ -145,6 +145,23 @@ static void fb_swizzledMethod_5(id self, SEL _cmd, id arg, id arg2, id arg3)
   }
 }
 
+static BOOL fb_swizzledMethod_5_bool(id self, SEL _cmd, id arg, id arg2, id arg3)
+{
+  FB_FIND_SWIZZLE;
+  BOOL result = NO;
+  if (swizzle) {
+    result = ((BOOL (*)(id, SEL, id, id, id))swizzle.originalMethod)(self, _cmd, arg, arg2, arg3);
+
+    NSEnumerator *blocks = [swizzle.blocks objectEnumerator];
+    _swizzleBlock block;
+    while ((block = [blocks nextObject])) {
+      block(self, _cmd, arg, arg2, arg3);
+    }
+    FB_REMOVE_SELECTOR;
+  }
+  return result;
+}
+
 static void fb_swizzleMethod_4_io(id self, SEL _cmd, NSInteger arg, id arg2)
 {
   FB_FIND_SWIZZLE;
@@ -272,6 +289,13 @@ static void (*fb_swizzledMethods[MAX_ARGS - MIN_ARGS + 1])() = {fb_swizzledMetho
                     swizzledMethod = (IMP)fb_swizzleMethod_4_io;
                   }
                   free(type);
+                }
+                if (5 == numArgs) {
+                  char *returnType = method_copyReturnType(aMethod);
+                  if (strcmp(returnType, @encode(BOOL)) == 0) {
+                    swizzledMethod = (IMP)fb_swizzledMethod_5_bool;
+                  }
+                  free(returnType);
                 }
 
                 FBSDKSwizzle *swizzle = [FBSDKSwizzler swizzleForMethod:aMethod];
