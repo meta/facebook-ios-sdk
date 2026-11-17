@@ -22,6 +22,10 @@ Please take a moment and [subscribe to releases](https://docs.github.com/en/ente
 
 ## TRY IT OUT
 
+See the [installation and application lifecycle guide](INSTALLATION.md) for
+dependency-manager import names, version selection, SwiftUI and UIKit setup,
+and dynamic framework embedding.
+
 ### Swift Package Manager
 
 1. In Xcode, select File > Add Package Dependencies.
