@@ -44,18 +44,37 @@ fi
 
 WORKSPACE="FacebookSDK.xcworkspace"
 
+# Other Xcode installs may provide runtimes newer than the active toolchain.
+if ! SIMULATOR_SDK_VERSION=$(xcrun --sdk iphonesimulator --show-sdk-version); then
+  echo "Error: cannot determine the iOS Simulator SDK for the active Xcode." >&2
+  echo "Check DEVELOPER_DIR or xcode-select and finish Xcode setup." >&2
+  exit 1
+fi
+if ! printf '%s\n' "$SIMULATOR_SDK_VERSION" | grep -Eq '^[0-9]+(\.[0-9]+)*$'; then
+  echo "Error: invalid iOS Simulator SDK version '$SIMULATOR_SDK_VERSION'." >&2
+  exit 1
+fi
+
 # Keep the OS paired with the simulator name. Omitting it resolves the name on
 # the latest runtime, where a device selected from an older runtime may not exist.
 DESTINATION_SPEC=$(xcodebuild -scheme "$SCHEME" -workspace "$WORKSPACE" -showdestinations 2>/dev/null \
   | grep 'platform:iOS Simulator' \
   | grep 'name:iPhone' \
+  | grep -v 'error:' \
   | sed -n 's/.*OS:\([0-9][0-9.]*\).*name:\(.*\) }.*/\1|\2/p' \
+  | awk -F'|' -v sdk="$SIMULATOR_SDK_VERSION" '
+      BEGIN { split(sdk, sdk_parts, ".") }
+      {
+        split($1, os_parts, ".")
+        if (os_parts[1]+0 < sdk_parts[1]+0 ||
+            (os_parts[1]+0 == sdk_parts[1]+0 && os_parts[2]+0 <= sdk_parts[2]+0)) print
+      }' \
   | sort -t'|' -k1,1 -Vr \
   | head -1 || true)
 
 if [ -z "$DESTINATION_SPEC" ]; then
-  echo "Error: no iPhone simulator destination found for scheme '$SCHEME'." >&2
-  echo "Check the scheme exists: xcodebuild -workspace $WORKSPACE -list" >&2
+  echo "Error: no iPhone simulator within iOS Simulator SDK $SIMULATOR_SDK_VERSION was found for '$SCHEME'." >&2
+  echo "Select a matching Xcode via DEVELOPER_DIR or xcode-select, or install a suitable iOS runtime." >&2
   exit 1
 fi
 
