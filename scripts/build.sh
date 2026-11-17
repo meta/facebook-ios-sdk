@@ -44,20 +44,25 @@ fi
 
 WORKSPACE="FacebookSDK.xcworkspace"
 
-# Find the first available iPhone simulator destination dynamically
-DEVICE_NAME=$(xcodebuild -scheme "$SCHEME" -workspace "$WORKSPACE" -showdestinations 2>/dev/null \
-  | grep 'iOS Simulator' \
-  | grep -o 'name:[^,}]*' \
-  | grep 'iPhone' \
-  | head -1 \
-  | sed 's/name://;s/^[[:space:]]*//;s/[[:space:]]*$//')
+# Keep the OS paired with the simulator name. Omitting it resolves the name on
+# the latest runtime, where a device selected from an older runtime may not exist.
+DESTINATION_SPEC=$(xcodebuild -scheme "$SCHEME" -workspace "$WORKSPACE" -showdestinations 2>/dev/null \
+  | grep 'platform:iOS Simulator' \
+  | grep 'name:iPhone' \
+  | sed -n 's/.*OS:\([0-9][0-9.]*\).*name:\(.*\) }.*/\1|\2/p' \
+  | sort -t'|' -k1,1 -Vr \
+  | head -1 || true)
 
-if [ -z "$DEVICE_NAME" ]; then
-  echo "Warning: No iPhone simulator found via -showdestinations, defaulting to 'iPhone 16'" >&2
-  DEVICE_NAME="iPhone 16"
+if [ -z "$DESTINATION_SPEC" ]; then
+  echo "Error: no iPhone simulator destination found for scheme '$SCHEME'." >&2
+  echo "Check the scheme exists: xcodebuild -workspace $WORKSPACE -list" >&2
+  exit 1
 fi
 
-DESTINATION="platform=iOS Simulator,name=$DEVICE_NAME"
+DEVICE_OS=${DESTINATION_SPEC%%|*}
+DEVICE_NAME=${DESTINATION_SPEC#*|}
+
+DESTINATION="platform=iOS Simulator,name=$DEVICE_NAME,OS=$DEVICE_OS"
 
 echo "Building scheme: $SCHEME (destination: $DEVICE_NAME)"
 
