@@ -188,32 +188,32 @@ extension Target {
     enum Prefixed {
         static let basics = binaryTarget(
             name: .Prefixed.basics,
-            remoteChecksum: "7cdfe6a706a4852854aac2dcb24b4aa48ad231f1a3655605ea2333b6d0e2b305"
+            remoteChecksum: "10d8c6e5d1b59e31bc741fa9953911bd478500f3c80d491302c466ff7e2a5204"
         )
 
         static let aem = binaryTarget(
             name: .Prefixed.aem,
-            remoteChecksum: "df494f1e8130d975a0dfbfd54d1471c63d86767589bf03b98f6631ad87feb2ad"
+            remoteChecksum: "7fa685b258fbde85b2e381f654627d1f64b6d08f298d56d65f655eee0fce2a81"
         )
 
         static let core = binaryTarget(
             name: .Prefixed.core,
-            remoteChecksum: "791756b0786b79909de375d7060304d7822edac738218863f07470b1acfcde76"
+            remoteChecksum: "6c7c3792b914e54aa22ae5bf03d6041aa4e32df49819d8e77a157e5ff0f9bcd7"
         )
 
         static let login = binaryTarget(
             name: .Prefixed.login,
-            remoteChecksum: "d8e23d410d03776f5a2d267f3d935b12a391b878d921c286de9460ac0abad2a9"
+            remoteChecksum: "c38f78c4641f5fe06aa3f4f260edc58bf88148577df192d1e991148087f5b793"
         )
 
         static let share = binaryTarget(
             name: .Prefixed.share,
-            remoteChecksum: "e0c095a0fd6bbf51a1e349de09836f025e73ad907809bae7fcc5ee33934c2ceb"
+            remoteChecksum: "b09a0d06b38020a5885c75cd390de0b97d3083ba4cf4b3d17066e9d396eff0eb"
         )
 
         static let gamingServices = binaryTarget(
             name: .Prefixed.gaming,
-            remoteChecksum: "042585573eacdc19a50ee3852813bde62d02b254b83aa967ebdd6df6f54f319c"
+            remoteChecksum: "edb62d09cd2cf06e1913bf8fb4b1a5143a6c60cf19f9671f87b324e46a604a9e"
         )
     }
 }
