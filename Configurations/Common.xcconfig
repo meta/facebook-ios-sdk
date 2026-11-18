@@ -11,7 +11,7 @@
 ALWAYS_SEARCH_USER_PATHS = NO
 
 // Architectures to build
-ARCHS = $(ARCHS_STANDARD) arm64e
+ARCHS = $(ARCHS_STANDARD)
 
 // Whether to enable module imports
 CLANG_ENABLE_MODULES = YES

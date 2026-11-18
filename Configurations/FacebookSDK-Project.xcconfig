@@ -5,7 +5,7 @@
 // LICENSE file in the root directory of this source tree.
 
 // Architectures
-ARCHS = $(ARCHS_STANDARD) arm64e
+ARCHS = $(ARCHS_STANDARD)
 IPHONEOS_DEPLOYMENT_TARGET = 15.0
 SDKROOT = iphoneos
 

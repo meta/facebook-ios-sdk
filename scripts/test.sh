@@ -44,23 +44,39 @@ fi
 
 WORKSPACE="FacebookSDK.xcworkspace"
 
-# Find an available iPhone simulator destination dynamically, taking the newest runtime.
-# The OS must be carried through with the name: a destination that names a device but omits the
-# OS resolves against the latest installed runtime, and a device from an older runtime does not
-# exist there (an "iPhone 15" picked off an iOS 17 runtime fails on an Xcode whose latest is
-# iOS 26). Sorting by OS descending also keeps this on the newest runtime as Xcode versions change.
+# Other Xcode installs may provide runtimes newer than the active toolchain.
+if ! SIMULATOR_SDK_VERSION=$(xcrun --sdk iphonesimulator --show-sdk-version); then
+  echo "Error: cannot determine the iOS Simulator SDK for the active Xcode." >&2
+  echo "Check DEVELOPER_DIR or xcode-select and finish Xcode setup." >&2
+  exit 1
+fi
+if ! printf '%s\n' "$SIMULATOR_SDK_VERSION" | grep -Eq '^[0-9]+(\.[0-9]+)*$'; then
+  echo "Error: invalid iOS Simulator SDK version '$SIMULATOR_SDK_VERSION'." >&2
+  exit 1
+fi
+
+# Select the newest scheme-available iPhone runtime no newer than the active SDK.
+# Compare release families so a matching runtime patch is still usable.
 DESTINATION_SPEC=$(xcodebuild -scheme "$SCHEME" -workspace "$WORKSPACE" -showdestinations 2>/dev/null \
   | grep 'platform:iOS Simulator' \
   | grep 'name:iPhone' \
+  | grep -v 'error:' \
   | sed -n 's/.*OS:\([0-9][0-9.]*\).*name:\(.*\) }.*/\1|\2/p' \
+  | awk -F'|' -v sdk="$SIMULATOR_SDK_VERSION" '
+      BEGIN { split(sdk, sdk_parts, ".") }
+      {
+        split($1, os_parts, ".")
+        if (os_parts[1]+0 < sdk_parts[1]+0 ||
+            (os_parts[1]+0 == sdk_parts[1]+0 && os_parts[2]+0 <= sdk_parts[2]+0)) print
+      }' \
   | sort -t'|' -k1,1 -Vr \
   | head -1 || true)
 
 # `|| true` above so that a scheme with no matching destination reaches this check rather than
 # aborting the pipeline under `set -e`, which exits silently with no output at all.
 if [ -z "$DESTINATION_SPEC" ]; then
-  echo "Error: no iPhone simulator destination found for scheme '$SCHEME'." >&2
-  echo "Check the scheme exists: xcodebuild -workspace $WORKSPACE -list" >&2
+  echo "Error: no iPhone simulator within iOS Simulator SDK $SIMULATOR_SDK_VERSION was found for '$SCHEME'." >&2
+  echo "Select a matching Xcode via DEVELOPER_DIR or xcode-select, or install a suitable iOS runtime." >&2
   exit 1
 fi
 
