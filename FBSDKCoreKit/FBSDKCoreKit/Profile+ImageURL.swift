@@ -33,7 +33,9 @@ extension Profile {
 
    - Parameters:
      - pictureMode: The picture mode.
-     - size: The height and width. This will be rounded to integer precision.
+     - size: The height and width, truncated toward zero to integer precision.
+   - Returns: The image URL. Graph API URL construction returns `nil` if either dimension cannot
+     be represented as an integer.
    */
   @objc(imageURLForPictureMode:size:)
   public func imageURL(forMode pictureMode: PictureMode, size: CGSize) -> URL? {
@@ -45,12 +47,16 @@ extension Profile {
     pictureMode: PictureMode,
     size: CGSize
   ) -> URL? {
-    guard let dependencies = try? Self.getDependencies() else { return nil }
+    guard
+      let dependencies = try? Self.getDependencies(),
+      let width = Int(exactly: size.width.rounded(.towardZero)),
+      let height = Int(exactly: size.height.rounded(.towardZero))
+    else { return nil }
 
     var queryItems: [ImageURL.QueryItemName: String] = [
       .pictureMode: ImageURL.PictureMode(mode: pictureMode).rawValue,
-      .width: String(Int(size.width)),
-      .height: String(Int(size.height)),
+      .width: String(width),
+      .height: String(height),
     ]
 
     if let token = dependencies.accessTokenProvider.current {

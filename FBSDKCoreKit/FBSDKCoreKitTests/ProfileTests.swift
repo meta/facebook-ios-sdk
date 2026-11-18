@@ -347,6 +347,40 @@ final class ProfileTests: XCTestCase {
 
   // MARK: - Size Validations
 
+  func testCreatingImageURLWithUnrepresentableDimensionsReturnsNil() {
+    let dimensions: [CGFloat] = [
+      .nan,
+      .infinity,
+      -.infinity,
+      .greatestFiniteMagnitude,
+      CGFloat(Int.max),
+      CGFloat(Int.min).nextDown,
+    ]
+    for dimension in dimensions {
+      for size in [CGSize(width: dimension, height: 100), CGSize(width: 100, height: dimension)] {
+        XCTAssertNil(profile.imageURL(forMode: .normal, size: size))
+      }
+    }
+    XCTAssertNil(urlHoster.capturedQueryParameters)
+  }
+
+  func testCreatingImageURLTruncatesFractionalDimensionsTowardZero() throws {
+    try makeImageURL(size: CGSize(width: 12.75, height: -12.75))
+
+    let queryItems = try XCTUnwrap(urlHoster.capturedQueryParameters)
+    XCTAssertEqual(queryItems[widthKey], "12")
+    XCTAssertEqual(queryItems[heightKey], "-12")
+  }
+
+  func testCreatingImageURLPreservesRepresentableIntegerBounds() throws {
+    let largestDimension = CGFloat(Int.max).nextDown
+    try makeImageURL(size: CGSize(width: CGFloat(Int.min), height: largestDimension))
+
+    let queryItems = try XCTUnwrap(urlHoster.capturedQueryParameters)
+    XCTAssertEqual(queryItems[widthKey], String(Int.min))
+    XCTAssertEqual(queryItems[heightKey], String(format: "%.0f", Double(largestDimension)))
+  }
+
   func testCreatingImageURLWithNoSize() throws {
     try makeImageURL(mode: .square, size: .zero)
 
