@@ -13,6 +13,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 [Full Changelog](https://github.com/meta/facebook-ios-sdk/compare/v19.0.1...HEAD)
 
 ### Fixed
+- Preserve session timing when the app resumes before background persistence completes.
 - The prebuilt XCFrameworks no longer contain an `arm64e` slice; iOS device slices are `arm64`
   only again, as they were through 18.0.1. In 18.1.0 through 19.0.1 the dynamic frameworks were
   fat `arm64` + `arm64e` binaries, and apps that embed them in an `arm64`-only app could fail to
