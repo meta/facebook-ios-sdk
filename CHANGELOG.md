@@ -14,6 +14,13 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 - Preserve session timing when the app resumes before background persistence completes.
+- The prebuilt XCFrameworks no longer contain an `arm64e` slice; iOS device slices are `arm64`
+  only again, as they were through 18.0.1. In 18.1.0 through 19.0.1 the dynamic frameworks were
+  fat `arm64` + `arm64e` binaries, and apps that embed them in an `arm64`-only app could fail to
+  launch on iOS 17 and 18 after an App Store update, with dyld reporting
+  `could not register fairplay decryption`
+  ([#3997](https://github.com/meta/facebook-ios-sdk/issues/3997)). Apps on those versions can
+  strip the slice in a build phase (`lipo -remove arm64e`) until they update.
 
 ## 19.0.1
 
