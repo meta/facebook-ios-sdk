@@ -76,8 +76,8 @@ extension IAPTransactionObserver: _TransactionObserving {
 // MARK: - Store Kit 2
 
 extension IAPTransactionObserver {
-  private var transactionListenerTask: Task<Void, Error>? {
-    anyTransactionListenerTask as? Task<Void, Error>
+  private var transactionListenerTask: Task<Void, Never>? {
+    anyTransactionListenerTask as? Task<Void, Never>
   }
 
   private func checkForRestoredPurchases() async {
@@ -159,7 +159,7 @@ extension IAPTransactionObserver {
         observationTime = dependencies.appEventsConfigurationProvider.cachedAppEventsConfiguration.iapObservationTime
       }
       isObservingStoreKit2Transactions = true
-      anyTransactionListenerTask = Task {
+      anyTransactionListenerTask = Task<Void, Never> {
         await checkForRestoredPurchases()
         while !Task.isCancelled {
           await observeNewTransactions()
@@ -254,6 +254,10 @@ extension IAPTransactionObserver {
 
   var configuredObservationTime: UInt64 {
     observationTime
+  }
+
+  var storeKit2ObservationTask: Task<Void, Never>? {
+    anyTransactionListenerTask as? Task<Void, Never>
   }
 }
 #endif
