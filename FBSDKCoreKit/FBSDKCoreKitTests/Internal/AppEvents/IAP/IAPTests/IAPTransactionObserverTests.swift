@@ -39,6 +39,16 @@ final class IAPTransactionObserverTests: StoreKitTestCase {
 // MARK: - Store Kit 2
 
 extension IAPTransactionObserverTests {
+  func testStopObservingCancelsStoreKit2Task() throws {
+    IAPTransactionObserver.shared.startObserving()
+    let task = try XCTUnwrap(IAPTransactionObserver.shared.storeKit2ObservationTask)
+    defer { task.cancel() }
+
+    IAPTransactionObserver.shared.stopObserving()
+
+    XCTAssertTrue(task.isCancelled)
+  }
+
   func testIAPObservationTime() async {
     IAPTransactionObserver.shared.startObserving()
     XCTAssertEqual(IAPTransactionObserver.shared.configuredObservationTime, 10000000000)
