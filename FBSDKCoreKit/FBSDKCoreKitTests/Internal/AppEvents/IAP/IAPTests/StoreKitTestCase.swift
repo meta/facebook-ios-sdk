@@ -9,7 +9,9 @@
 @testable import FBSDKCoreKit
 @testable import IAPTestsHostApp
 
+import Foundation
 import StoreKitTest
+import UIKit
 import XCTest
 
 // swiftlint:disable:this test_classes_should_be_final
@@ -50,9 +52,12 @@ class StoreKitTestCase: XCTestCase {
 
   override func setUp() async throws {
     try await super.setUp()
+    // Configure local StoreKit before the first StoreKit or SDK operation.
+    logStoreKitPhase("session setup started")
+    try setupTestSession()
+    logStoreKitPhase("session setup completed")
     IAPTransactionCache.shared.reset()
     startObservingTransactionUpdates()
-    try setupTestSession()
   }
 
   override func tearDown() {
@@ -81,6 +86,97 @@ class StoreKitTestCase: XCTestCase {
 }
 
 extension StoreKitTestCase {
+  // Flush phase boundaries so a stalled CI read can identify the suspended call.
+  func logStoreKitPhase(_ phase: String) {
+    FileHandle.standardError.write(Data("StoreKit test \(name): \(phase)\n".utf8))
+  }
+
+  // Supply the hosted app's visible scene instead of relying on an implicit UI anchor.
+  @MainActor
+  func purchaseTestProduct(_ product: Product) async throws -> Product.PurchaseResult {
+    guard #available(iOS 17.0, *) else {
+      return try await product.purchase()
+    }
+    let deadline = Date().addingTimeInterval(5)
+    var purchaseScene: UIWindowScene?
+    repeat {
+      let candidate = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first {
+        ($0.activationState == .foregroundActive || $0.activationState == .foregroundInactive) &&
+          $0.windows.contains { window in
+            !window.isHidden && window.rootViewController?.viewIfLoaded?.window === window
+          }
+      }
+      if Date() <= deadline { purchaseScene = candidate }
+      if purchaseScene != nil || Date() >= deadline { break }
+      try await Task.sleep(nanoseconds: 100_000_000)
+    } while Date() < deadline
+    let scene = try XCTUnwrap(purchaseScene, "The StoreKit test host has no foreground purchase scene")
+    logStoreKitPhase("explicit purchase scene available")
+    return try await product.purchase(confirmIn: scene)
+  }
+
+  // iOS 27.1 StoreKit tests can leave repeated purchases unfinished after finish().
+  // Enumerating first worked around this in a StoreKit-only repro. Use only when
+  // preparing finished purchases; don't bypass tests of unfinished transactions.
+  func finishTestTransaction(_ transaction: Transaction) async throws {
+    logStoreKitPhase("unfinished enumeration before finish started")
+    // Require the exact verified ID, allowing bounded publication across fresh snapshots.
+    // Absence alone isn't evidence that a purchase was already finished.
+    let deadline = Date().addingTimeInterval(5)
+    var observedID: UInt64?
+    var attempt = 0
+    repeat {
+      attempt += 1
+      let before = try await verifiedUnfinishedIDs()
+      if before.contains(transaction.id), Date() <= deadline {
+        observedID = transaction.id
+        break
+      }
+      if attempt == 1 {
+        logStoreKitPhase("unfinished state not ready: target=\(transaction.id) ids=\(before)")
+      }
+      if Date() >= deadline { break }
+      try await Task.sleep(nanoseconds: 100_000_000)
+    } while Date() < deadline
+    logStoreKitPhase("unfinished enumeration before finish completed after \(attempt) reads")
+    _ = try XCTUnwrap(observedID, "Fresh purchase missing from Transaction.unfinished within five seconds")
+
+    logStoreKitPhase("finish started")
+    await transaction.finish()
+    logStoreKitPhase("finish completed")
+
+    logStoreKitPhase("unfinished enumeration after finish started")
+    let finishDeadline = Date().addingTimeInterval(5)
+    var finished = false
+    var finishReads = 0
+    repeat {
+      finishReads += 1
+      let after = try await verifiedUnfinishedIDs()
+      if !after.contains(transaction.id), Date() <= finishDeadline {
+        finished = true
+        break
+      }
+      if finishReads == 1 {
+        logStoreKitPhase("finished state not ready: target=\(transaction.id) ids=\(after)")
+      }
+      if Date() >= finishDeadline { break }
+      try await Task.sleep(nanoseconds: 100_000_000)
+    } while Date() < finishDeadline
+    logStoreKitPhase("unfinished enumeration after finish completed after \(finishReads) reads")
+    _ = try XCTUnwrap(finished ? transaction : nil, "Finished purchase remained unfinished within five seconds")
+  }
+
+  private func verifiedUnfinishedIDs() async throws -> [UInt64] {
+    var ids: [UInt64] = []
+    for await result in Transaction.unfinished {
+      switch result {
+      case let .verified(value): ids.append(value.id)
+      case let .unverified(_, error): throw error
+      }
+    }
+    return ids
+  }
+
   var testSession: SKTestSession {
     anyTestSession as! SKTestSession // swiftlint:disable:this force_cast
   }

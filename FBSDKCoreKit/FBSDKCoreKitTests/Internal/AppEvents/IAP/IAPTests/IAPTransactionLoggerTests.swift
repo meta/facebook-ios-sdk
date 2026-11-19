@@ -416,26 +416,61 @@ extension IAPTransactionLoggerTests {
   }
 
   @available(iOS 17.0, *)
-  func testLogNewSubscriptionTransactionRenewal() async {
-    testSession.timeRate = .oneRenewalEveryTwoSeconds
-    guard let products =
-      try? await Product.products(for: [Self.ProductIdentifiers.autoRenewingSubscription1.rawValue]),
-      let product = products.first else {
-      return
+  func testLogNewSubscriptionTransactionRenewal() async throws {
+    testSession.timeRate = .realTime
+    let identifier = Self.ProductIdentifiers.autoRenewingSubscription1.rawValue
+    let products = try await Product.products(for: [identifier])
+    let product = try XCTUnwrap(products.first { $0.id == identifier })
+    let result = try await product.purchase()
+    guard case let .success(originalResult) = result else {
+      throw StoreKitTestCaseError.purchaseFailed
     }
-    guard let result = try? await product.purchase() else {
-      return
+    let original: Transaction
+    switch originalResult {
+    case let .verified(value): original = value
+    case let .unverified(_, error): throw error
     }
-    guard let originalTransaction = try? getIAPTransactionForPurchaseResult(result: result) else {
-      return
-    }
-    await originalTransaction.transaction.finish()
+    let isFreshLocalSubscription = original.environment == .xcode &&
+      original.productID == identifier && original.id == original.originalID
+    _ = try XCTUnwrap(
+      isFreshLocalSubscription ? original : nil,
+      "Renewal fixture requires a fresh verified local subscription"
+    )
+    let originalTransaction = originalResult.iapTransaction
+    try await finishTestTransaction(original)
     await iapLogger.logNewTransaction(originalTransaction)
-    sleep(3)
-    let transactions = await Transaction.all.getValues()
-    guard let renewalTransaction = transactions.first?.iapTransaction else {
-      return
-    }
+
+    // Test renewal logging with an actual controlled renewal, not clock timing or history order.
+    try testSession.forceRenewalOfSubscription(productIdentifier: identifier)
+    let deadline = Date().addingTimeInterval(3)
+    var renewalResult: VerificationResult<Transaction>?
+    repeat {
+      if let result = await Transaction.latest(for: identifier) {
+        switch result {
+        case let .verified(value):
+          let controllerMatch = testSession.allTransactions().contains {
+            $0.identifier == .init(value.id) && $0.productIdentifier == identifier
+          }
+          if value.environment == .xcode,
+             value.productID == identifier,
+             value.originalID == original.id,
+             value.id != original.id,
+             controllerMatch,
+             Date() <= deadline {
+            renewalResult = result
+          }
+        case let .unverified(_, error): throw error
+        }
+      }
+      if renewalResult != nil || Date() >= deadline { break }
+      try await Task.sleep(nanoseconds: 100_000_000)
+    } while Date() < deadline
+    let publishedRenewal = try XCTUnwrap(
+      renewalResult,
+      "Verified controlled renewal was not published within three seconds"
+    )
+    let renewalTransaction = publishedRenewal.iapTransaction
+    logStoreKitPhase("controlled renewal original=\(original.id) new=\(renewalTransaction.transaction.id)")
     await iapLogger.logNewTransaction(renewalTransaction)
     XCTAssertEqual(eventLogger.capturedEventName, .subscribe)
     XCTAssertEqual(eventLogger.capturedValueToSum, 2)

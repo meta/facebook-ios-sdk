@@ -48,6 +48,17 @@ final class TransactionTests: StoreKitTestCase {
     return products
   }
 
+  private func verifiedHistoryTransaction(
+    _ id: UInt64,
+    in history: [VerificationResult<Transaction>]
+  ) throws -> Transaction {
+    let result = try XCTUnwrap(history.first { $0.iapTransaction.transaction.id == id })
+    switch result {
+    case let .verified(value): return value
+    case let .unverified(_, error): throw error
+    }
+  }
+
   func testGetAllTransactions() async throws {
     let products = try await allProducts()
     for product in products {
@@ -70,65 +81,68 @@ final class TransactionTests: StoreKitTestCase {
 
   func testGetNewCandidateTransactions() async throws {
     let products = try await allProducts()
-
-    // Each product plays a specific role, one per exclusion path in
-    // `Transaction.getNewCandidateTransactions()`, plus the one transaction that
-    // is expected to survive all of them.
-    let purchasedBeforeCutoff = try product(.consumableProduct1, in: products)
+    let purchasedBeforeCutoff = try product(.nonRenewingSubscription1, in: products)
     let refunded = try product(.nonConsumableProduct1, in: products)
     let neverFinished = try product(.nonConsumableProduct2, in: products)
     let expected = try product(.autoRenewingSubscription1, in: products)
 
-    // Excluded by the `newCandidatesDate` check: purchased before the cutoff.
-    _ = try await purchaseAndFinish(purchasedBeforeCutoff)
+    let olderTransaction = try await purchaseAndFinish(purchasedBeforeCutoff)
     IAPTransactionCache.shared.newCandidatesDate = Date()
+    let cutoff = try XCTUnwrap(IAPTransactionCache.shared.newCandidatesDate)
 
-    // Excluded by the `revocationDate` check.
     let refundedTransaction = try await purchaseAndFinish(refunded)
     try testSession.refundTransaction(identifier: UInt(refundedTransaction.transaction.id))
 
-    // Excluded by the unfinished check: deliberately never finished.
-    let unfinishedResult = try await neverFinished.purchase()
-    _ = try getIAPTransactionForPurchaseResult(result: unfinishedResult)
+    // Finish the positive candidate before creating the deliberately unfinished
+    // purchase, so preparing one receipt can't change the other's fixture state.
+    let expectedResult = try await expected.purchase()
+    guard case let .success(.verified(expectedReceipt)) = expectedResult else {
+      throw StoreKitTestCaseError.purchaseFailed
+    }
+    try await finishTestTransaction(expectedReceipt)
 
-    let expectedTransaction = try await purchaseAndFinish(expected)
+    let unfinishedResult = try await neverFinished.purchase()
+    guard case let .success(.verified(unfinishedReceipt)) = unfinishedResult else {
+      throw StoreKitTestCaseError.purchaseFailed
+    }
+
+    let history = await Transaction.all.getValues()
+    let olderHistory = try verifiedHistoryTransaction(olderTransaction.transaction.id, in: history)
+    XCTAssertLessThanOrEqual(olderHistory.purchaseDate, cutoff)
+    XCTAssertNil(olderHistory.revocationDate)
+    if let expirationDate = olderHistory.expirationDate {
+      XCTAssertGreaterThan(expirationDate, Date())
+    }
+    let refundedHistory = try verifiedHistoryTransaction(refundedTransaction.transaction.id, in: history)
+    XCTAssertGreaterThan(refundedHistory.purchaseDate, cutoff)
+    XCTAssertNotNil(refundedHistory.revocationDate)
+    let positiveHistory = try verifiedHistoryTransaction(expectedReceipt.id, in: history)
+    XCTAssertGreaterThan(positiveHistory.purchaseDate, cutoff)
+    XCTAssertNil(positiveHistory.revocationDate)
+    XCTAssertGreaterThan(try XCTUnwrap(positiveHistory.expirationDate), Date())
+
+    let unfinishedIDs = await Transaction.unfinished.getValues().map(\.iapTransaction.transaction.id)
+    XCTAssertTrue(unfinishedIDs.contains(unfinishedReceipt.id), "Unfinished control is missing")
+    XCTAssertFalse(unfinishedIDs.contains(expectedReceipt.id), "Finished candidate is still unfinished")
+    XCTAssertFalse(unfinishedIDs.contains(olderTransaction.transaction.id))
+    XCTAssertFalse(unfinishedIDs.contains(refundedTransaction.transaction.id))
+    XCTAssertGreaterThan(unfinishedReceipt.purchaseDate, cutoff)
+    XCTAssertNil(unfinishedReceipt.revocationDate)
 
     var candidateTransactions = await Transaction.getNewCandidateTransactions()
+    XCTAssertEqual(candidateTransactions.map(\.iapTransaction.transaction.id), [expectedReceipt.id])
 
-    // A failure here is almost always StoreKit disagreeing about which
-    // transactions are unfinished, so report that state rather than a bare count.
-    let unfinishedIDs = await Transaction.unfinished.getValues().map(\.iapTransaction.transaction.id)
-    let allIDs = await Transaction.all.getValues().map(\.iapTransaction.transaction.id)
-    let state = "candidates=\(candidateTransactions.map(\.iapTransaction.transaction.id)) "
-      + "unfinished=\(unfinishedIDs) all=\(allIDs) expected=\(expectedTransaction.transaction.id)"
-
-    // Known StoreKit discrepancy on iOS 27, tracked in T288963466: a non-consumable
-    // that was purchased and never finished is absent from `Transaction.unfinished`,
-    // while an auto-renewable subscription that was finished is present in it. The
-    // filter in `Transaction.getNewCandidateTransactions()` therefore keeps the
-    // wrong transaction and drops the right one. Strict on purpose: once the
-    // discrepancy is fixed this reports "expected failure did not occur", which
-    // forces the annotation to be removed instead of quietly outliving the bug.
-    XCTExpectFailure(
-      "iOS 27 Transaction.unfinished misreports unfinished transactions (T288963466)",
-      strict: true
-    )
-
-    XCTAssertEqual(candidateTransactions.count, 1, state)
-    XCTAssertEqual(
-      candidateTransactions.first?.iapTransaction.transaction.id,
-      expectedTransaction.transaction.id,
-      state
-    )
-
-    // Once recorded in the cache it is no longer a candidate.
     IAPTransactionCache.shared.addTransaction(
-      transactionID: String(expectedTransaction.transaction.id),
+      transactionID: String(expectedReceipt.id),
       eventName: .purchased,
-      productID: expectedTransaction.transaction.productID
+      productID: expectedReceipt.productID
     )
+    XCTAssertTrue(IAPTransactionCache.shared.contains(
+      transactionID: String(expectedReceipt.id),
+      productID: expectedReceipt.productID
+    ))
     candidateTransactions = await Transaction.getNewCandidateTransactions()
-    XCTAssertEqual(candidateTransactions.count, 0)
+    XCTAssertTrue(candidateTransactions.isEmpty)
   }
 
   func testGetNewCandidateTransactionsWithExpiredSubscription() async throws {
@@ -138,10 +152,76 @@ final class TransactionTests: StoreKitTestCase {
 
     let identifier = ProductIdentifiers.autoRenewingSubscription1.rawValue
     let transaction = try await testSession.buyProduct(identifier: identifier)
-    await transaction.finish()
+    try await finishTestTransaction(transaction)
+
+    let activeCandidates = await Transaction.getNewCandidateTransactions()
+    XCTAssertTrue(activeCandidates.contains { $0.iapTransaction.transaction.id == transaction.id })
+
+    try testSession.disableAutoRenewForTransaction(identifier: .init(transaction.id))
+    let testTransaction = try XCTUnwrap(testSession.allTransactions().first {
+      $0.identifier == .init(transaction.id) && $0.productIdentifier == identifier
+    })
+    XCTAssertFalse(testTransaction.autoRenewingEnabled)
     try testSession.expireSubscription(productIdentifier: identifier)
+    let expiredTestTransaction = try XCTUnwrap(testSession.allTransactions().first {
+      $0.identifier == .init(transaction.id) && $0.productIdentifier == identifier
+    })
+    let controllerExpiration = try XCTUnwrap(expiredTestTransaction.expirationDate)
+    logStoreKitPhase("controller expiry=\(controllerExpiration)")
+    XCTAssertLessThanOrEqual(controllerExpiration, Date(), "Test controller did not apply expiry")
+    _ = try XCTUnwrap(
+      transaction.environment == .xcode ? transaction : nil,
+      "Expiry synchronization requires the local Xcode StoreKit environment"
+    )
+    // Refresh the local test receipt after mutating the test controller's expiry.
+    try await AppStore.sync()
+
+    // Query the current receipt before checking that transaction history agrees.
+    // Expiry need not emit a Transaction.updates event.
+    let deadline = Date().addingTimeInterval(5)
+    var expiredTransaction: Transaction?
+    var lastReceiptState = "no receipt"
+    repeat {
+      if let result = await Transaction.latest(for: identifier) {
+        switch result {
+        case let .verified(value):
+          lastReceiptState = "verified id=\(value.id) original=\(value.originalID) expiry=\(String(describing: value.expirationDate))"
+          if value.id == transaction.id,
+             let expirationDate = value.expirationDate,
+             expirationDate <= Date(),
+             Date() <= deadline {
+            expiredTransaction = value
+          }
+        case let .unverified(_, error): throw error
+        }
+      }
+      if expiredTransaction != nil || Date() >= deadline { break }
+      try await Task.sleep(nanoseconds: 100_000_000)
+    } while Date() < deadline
+    logStoreKitPhase("expiry target=\(transaction.id) controller=\(controllerExpiration) latest=\(lastReceiptState)")
+    let expired = try XCTUnwrap(expiredTransaction, "StoreKit did not apply the requested expiry: \(lastReceiptState)")
+    let expirationDate = try XCTUnwrap(expired.expirationDate)
+    XCTAssertLessThanOrEqual(expirationDate, Date())
+    let history = await Transaction.all.getValues()
+    let historyResult = try XCTUnwrap(history.first {
+      $0.iapTransaction.transaction.id == transaction.id
+    })
+    let historyTransaction: Transaction
+    switch historyResult {
+    case let .verified(value): historyTransaction = value
+    case let .unverified(_, error): throw error
+    }
+    let historyExpiration = try XCTUnwrap(historyTransaction.expirationDate)
+    XCTAssertLessThanOrEqual(historyExpiration, Date(), "History still reports an active subscription")
+    await expired.finish()
+    let unfinished = await Transaction.unfinished.getValues()
+    XCTAssertFalse(unfinished.contains { $0.iapTransaction.transaction.id == transaction.id })
 
     let candidateTransactions = await Transaction.getNewCandidateTransactions()
-    XCTAssertEqual(candidateTransactions.count, 0)
+    let details = candidateTransactions.map { result in
+      let value = result.iapTransaction.transaction
+      return "id=\(value.id) product=\(value.productID) expiration=\(String(describing: value.expirationDate))"
+    }
+    XCTAssertEqual(candidateTransactions.count, 0, "Expired-subscription candidates: \(details)")
   }
 }

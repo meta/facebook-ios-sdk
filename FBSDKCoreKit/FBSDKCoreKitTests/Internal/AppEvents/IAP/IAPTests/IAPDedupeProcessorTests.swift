@@ -754,29 +754,111 @@ final class IAPDedupeProcessorTests: StoreKitTestCase {
 // MARK: - Store Kit 2
 
 extension IAPDedupeProcessorTests {
-  private func executeTransactionFor(_ productID: String) async -> (IAPTransaction, Product)? {
-    guard let products =
-      try? await Product.products(for: [productID]),
-      let product = products.first else {
-      return nil
+  @available(iOS 17.0, *)
+  private func verifiedHistoryReceipt(
+    for transactionID: UInt64,
+    productID: String,
+    deadline: Date
+  ) async throws -> VerificationResult<Transaction>? {
+    var receipt: VerificationResult<Transaction>?
+    for await result in Transaction.all {
+      switch result {
+      case let .verified(value):
+        if value.id == transactionID, value.productID == productID, value.environment == .xcode {
+          receipt = result
+        }
+      case let .unverified(_, error): throw error
+      }
     }
-    guard let result = try? await product.purchase() else {
-      return nil
+    guard Date() <= deadline else { return nil }
+
+    if receipt != nil {
+      logStoreKitPhase("verified controlled receipt found in history: id=\(transactionID)")
     }
-    guard let iapTransaction = try? getIAPTransactionForPurchaseResult(result: result) else {
-      return nil
+    return receipt
+  }
+
+  @available(iOS 17.0, *)
+  private func verifiedControlledReceipt(
+    for transactionID: UInt64,
+    productID: String
+  ) async throws -> VerificationResult<Transaction> {
+    let deadline = Date().addingTimeInterval(5)
+    var receipt: VerificationResult<Transaction>?
+    repeat {
+      if let result = await Transaction.latest(for: productID) {
+        switch result {
+        case let .verified(value):
+          if value.id == transactionID,
+             value.productID == productID,
+             value.environment == .xcode,
+             Date() <= deadline { receipt = result }
+        case let .unverified(_, error): throw error
+        }
+      }
+      if receipt == nil {
+        receipt = try await verifiedHistoryReceipt(for: transactionID, productID: productID, deadline: deadline)
+      }
+      if receipt != nil || Date() >= deadline { break }
+      try await Task.sleep(nanoseconds: 100_000_000)
+    } while Date() < deadline
+    return try XCTUnwrap(receipt, "Controlled purchase receipt is not available")
+  }
+
+  private func executeTransactionFor(_ productID: String) async throws -> (IAPTransaction, Product) {
+    logStoreKitPhase("product lookup started")
+    let products = try await Product.products(for: [productID])
+    logStoreKitPhase("product lookup completed")
+    let product = try XCTUnwrap(products.first { $0.id == productID }, "No configured StoreKit product: \(productID)")
+    let verification: VerificationResult<Transaction>
+    if #available(iOS 17.0, *), product.type == .nonConsumable {
+      // Use a controlled non-consumable purchase for SDK deduplication tests.
+      // Subscription/trial tests retain Product.purchase() entry semantics.
+      logStoreKitPhase("test-session purchase started")
+      let purchased = try await testSession.buyProduct(identifier: productID)
+      logStoreKitPhase("test-session purchase completed")
+      _ = try XCTUnwrap(
+        purchased.environment == .xcode ? purchased : nil,
+        "Controlled purchase requires the local Xcode environment"
+      )
+      logStoreKitPhase("verified test receipt lookup started")
+      verification = try await verifiedControlledReceipt(for: purchased.id, productID: productID)
+      logStoreKitPhase("verified test receipt lookup completed")
+      guard case let .verified(value) = verification else {
+        throw StoreKitTestCaseError.purchaseFailed
+      }
+      _ = try XCTUnwrap(
+        value.environment == .xcode ? value : nil,
+        "Controlled purchase returned a different environment"
+      )
+    } else {
+      logStoreKitPhase("purchase started")
+      let result = try await purchaseTestProduct(product)
+      logStoreKitPhase("purchase completed")
+      guard case let .success(value) = result else {
+        throw StoreKitTestCaseError.purchaseFailed
+      }
+      verification = value
     }
-    await iapTransaction.transaction.finish()
+    let transaction: Transaction
+    switch verification {
+    case let .verified(value): transaction = value
+    case let .unverified(_, error): throw error
+    }
+    _ = try XCTUnwrap(
+      transaction.productID == productID ? transaction : nil,
+      "Controlled purchase returned a different product"
+    )
+    let iapTransaction = verification.iapTransaction
+    try await finishTestTransaction(transaction)
+    logStoreKitPhase("purchase preparation completed")
     return (iapTransaction, product)
   }
 
-  func testDedupWithDuplicatePurchaseEvents() async {
+  func testDedupWithDuplicatePurchaseEvents() async throws {
     dedupeProcessor.enable()
     let productID = Self.ProductIdentifiers.nonConsumableProduct1.rawValue
-    guard let (iapTransaction, product) =
-      await executeTransactionFor(productID) else {
-      return
-    }
+    let (iapTransaction, product) = try await executeTransactionFor(productID)
     dedupeProcessor.processManualEvent(
       .purchased,
       valueToSum: iapTransaction.transaction.price?.currencyNumber ?? product.price.currencyNumber,
@@ -809,13 +891,12 @@ extension IAPDedupeProcessorTests {
     await fulfillment(of: [expectation], timeout: 20.0)
   }
 
-  func testDedupWithDuplicatePurchaseEventsOperationalParameters() async {
+  func testDedupWithDuplicatePurchaseEventsOperationalParameters() async throws {
+    logStoreKitPhase("dedup enable started")
     dedupeProcessor.enable()
+    logStoreKitPhase("dedup enable completed")
     let productID = Self.ProductIdentifiers.nonConsumableProduct1.rawValue
-    guard let (iapTransaction, product) =
-      await executeTransactionFor(productID) else {
-      return
-    }
+    let (iapTransaction, product) = try await executeTransactionFor(productID)
     dedupeProcessor.processManualEvent(
       .purchased,
       valueToSum: iapTransaction.transaction.price?.currencyNumber ?? product.price.currencyNumber,
@@ -847,13 +928,10 @@ extension IAPDedupeProcessorTests {
     await fulfillment(of: [expectation], timeout: 20.0)
   }
 
-  func testDedupWithDuplicateSubscribeEvents() async {
+  func testDedupWithDuplicateSubscribeEvents() async throws {
     dedupeProcessor.enable()
     let productID = Self.ProductIdentifiers.autoRenewingSubscription1.rawValue
-    guard let (iapTransaction, product) =
-      await executeTransactionFor(productID) else {
-      return
-    }
+    let (iapTransaction, product) = try await executeTransactionFor(productID)
     dedupeProcessor.processManualEvent(
       .subscribe,
       valueToSum: iapTransaction.transaction.price?.currencyNumber ?? product.price.currencyNumber,
@@ -886,13 +964,10 @@ extension IAPDedupeProcessorTests {
     await fulfillment(of: [expectation], timeout: 20.0)
   }
 
-  func testDedupWithDuplicateStartTrialEvents() async {
+  func testDedupWithDuplicateStartTrialEvents() async throws {
     dedupeProcessor.enable()
     let productID = Self.ProductIdentifiers.autoRenewingSubscription2.rawValue
-    guard let (iapTransaction, product) =
-      await executeTransactionFor(productID) else {
-      return
-    }
+    let (iapTransaction, product) = try await executeTransactionFor(productID)
     dedupeProcessor.processManualEvent(
       .startTrial,
       valueToSum: iapTransaction.transaction.price?.currencyNumber ?? product.price.currencyNumber,
@@ -925,13 +1000,18 @@ extension IAPDedupeProcessorTests {
     await fulfillment(of: [expectation], timeout: 20.0)
   }
 
-  func testDedupWithDuplicatePurchaseEventsTestDedupConfig() async {
+  func testDedupWithDuplicatePurchaseEventsTestDedupConfig() async throws {
+    // Keep one production match so unordered config keys don't decide this assertion.
+    let singleMatchConfig = prodDedupConfig.filter { $0.key != "fb_transaction_id" }
+    appEventsConfigurationProvider.stubbedConfiguration = TestAppEventsConfiguration(
+      advertiserIDCollectionEnabled: true,
+      iapManualAndAutoLogDedupWindow: 10000,
+      iapProdDedupConfiguration: singleMatchConfig,
+      iapTestDedupConfiguration: testDedupConfig
+    )
     dedupeProcessor.enable()
     let productID = Self.ProductIdentifiers.nonConsumableProduct1.rawValue
-    guard let (iapTransaction, product) =
-      await executeTransactionFor(productID) else {
-      return
-    }
+    let (iapTransaction, product) = try await executeTransactionFor(productID)
     dedupeProcessor.processManualEvent(
       .purchased,
       valueToSum: iapTransaction.transaction.price?.currencyNumber ?? product.price.currencyNumber,
@@ -965,13 +1045,10 @@ extension IAPDedupeProcessorTests {
     await fulfillment(of: [expectation], timeout: 20.0)
   }
 
-  func testDedupWithNonDuplicatePurchaseEvents() async {
+  func testDedupWithNonDuplicatePurchaseEvents() async throws {
     dedupeProcessor.enable()
     let productID = Self.ProductIdentifiers.nonConsumableProduct1.rawValue
-    guard let (iapTransaction, product) =
-      await executeTransactionFor(productID) else {
-      return
-    }
+    let (iapTransaction, product) = try await executeTransactionFor(productID)
     dedupeProcessor.processManualEvent(
       .purchased,
       valueToSum: iapTransaction.transaction.price?.currencyNumber ?? product.price.currencyNumber,
@@ -994,18 +1071,12 @@ extension IAPDedupeProcessorTests {
     await fulfillment(of: [expectation], timeout: 20.0)
   }
 
-  func testSeveralManualAndImplicitEventsWithSomeDuplicatesAndSomeNonDuplicates() async {
+  func testSeveralManualAndImplicitEventsWithSomeDuplicatesAndSomeNonDuplicates() async throws {
     dedupeProcessor.enable()
     let productID = Self.ProductIdentifiers.nonConsumableProduct1.rawValue
-    guard let (iapTransaction, product) =
-      await executeTransactionFor(productID) else {
-      return
-    }
+    let (iapTransaction, product) = try await executeTransactionFor(productID)
     let productID2 = Self.ProductIdentifiers.nonConsumableProduct2.rawValue
-    guard let (iapTransaction2, _) =
-      await executeTransactionFor(productID2) else {
-      return
-    }
+    let (iapTransaction2, _) = try await executeTransactionFor(productID2)
     dedupeProcessor.processManualEvent(
       .purchased,
       valueToSum: iapTransaction.transaction.price?.currencyNumber ?? product.price.currencyNumber,
@@ -1017,10 +1088,7 @@ extension IAPDedupeProcessorTests {
       operationalParameters: nil
     )
     let productID3 = Self.ProductIdentifiers.nonRenewingSubscription1.rawValue
-    guard let (iapTransaction3, _) =
-      await executeTransactionFor(productID3) else {
-      return
-    }
+    let (iapTransaction3, _) = try await executeTransactionFor(productID3)
     dedupeProcessor.processManualEvent(
       .purchased,
       valueToSum: iapTransaction3.transaction.price?.currencyNumber ?? 0,

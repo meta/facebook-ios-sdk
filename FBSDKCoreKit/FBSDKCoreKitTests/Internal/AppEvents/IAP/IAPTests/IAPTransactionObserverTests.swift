@@ -92,20 +92,16 @@ extension IAPTransactionObserverTests {
     await fulfillment(of: [expectation], timeout: 20.0)
   }
 
-  func testAlreadyObservedRestoredPurchases() async {
+  func testAlreadyObservedRestoredPurchases() async throws {
     IAPTransactionCache.shared.newCandidatesDate = Date()
     IAPTransactionCache.shared.hasRestoredPurchases = true
-    guard let products =
-      try? await Product.products(for: [Self.ProductIdentifiers.nonConsumableProduct1.rawValue]) else {
-      return
-    }
-    guard let result = try? await products.first?.purchase() else {
-      return
-    }
-    guard let iapTransaction = try? getIAPTransactionForPurchaseResult(result: result) else {
-      return
-    }
-    await iapTransaction.transaction.finish()
+    let products = try await Product.products(for: [Self.ProductIdentifiers.nonConsumableProduct1.rawValue])
+    let product = try XCTUnwrap(products.first, "No configured StoreKit product")
+    let result = try await product.purchase()
+    guard case let .success(verification) = result else { throw StoreKitTestCaseError.purchaseFailed }
+    if case let .unverified(_, error) = verification { throw error }
+    let iapTransaction = try getIAPTransactionForPurchaseResult(result: result)
+    try await finishTestTransaction(iapTransaction.transaction)
     IAPTransactionObserver.shared.startObserving()
     let predicate = NSPredicate { _, _ -> Bool in
       TestIAPTransactionLogger.restoredStoreKit2Transactions.isEmpty &&
@@ -115,20 +111,16 @@ extension IAPTransactionObserverTests {
     await fulfillment(of: [expectation], timeout: 20.0)
   }
 
-  func testObserveNewTransactionsAfterTransactionMade() async {
+  func testObserveNewTransactionsAfterTransactionMade() async throws {
     IAPTransactionCache.shared.newCandidatesDate = Date()
     IAPTransactionCache.shared.hasRestoredPurchases = true
-    guard let products =
-      try? await Product.products(for: [Self.ProductIdentifiers.nonConsumableProduct1.rawValue]) else {
-      return
-    }
-    guard let result = try? await products.first?.purchase() else {
-      return
-    }
-    guard let iapTransaction = try? getIAPTransactionForPurchaseResult(result: result) else {
-      return
-    }
-    await iapTransaction.transaction.finish()
+    let products = try await Product.products(for: [Self.ProductIdentifiers.nonConsumableProduct1.rawValue])
+    let product = try XCTUnwrap(products.first, "No configured StoreKit product")
+    let result = try await product.purchase()
+    guard case let .success(verification) = result else { throw StoreKitTestCaseError.purchaseFailed }
+    if case let .unverified(_, error) = verification { throw error }
+    let iapTransaction = try getIAPTransactionForPurchaseResult(result: result)
+    try await finishTestTransaction(iapTransaction.transaction)
     IAPTransactionObserver.shared.startObserving()
     let predicate = NSPredicate { _, _ -> Bool in
       let didLog = TestIAPTransactionLogger.newStoreKit2Transactions.contains {
@@ -144,20 +136,16 @@ extension IAPTransactionObserverTests {
     await fulfillment(of: [expectation], timeout: 20.0)
   }
 
-  func testObserveNewTransactionsBeforeTransactionMade() async {
+  func testObserveNewTransactionsBeforeTransactionMade() async throws {
     IAPTransactionCache.shared.hasRestoredPurchases = true
     IAPTransactionObserver.shared.startObserving()
-    guard let products =
-      try? await Product.products(for: [Self.ProductIdentifiers.nonConsumableProduct1.rawValue]) else {
-      return
-    }
-    guard let result = try? await products.first?.purchase() else {
-      return
-    }
-    guard let iapTransaction = try? getIAPTransactionForPurchaseResult(result: result) else {
-      return
-    }
-    await iapTransaction.transaction.finish()
+    let products = try await Product.products(for: [Self.ProductIdentifiers.nonConsumableProduct1.rawValue])
+    let product = try XCTUnwrap(products.first, "No configured StoreKit product")
+    let result = try await product.purchase()
+    guard case let .success(verification) = result else { throw StoreKitTestCaseError.purchaseFailed }
+    if case let .unverified(_, error) = verification { throw error }
+    let iapTransaction = try getIAPTransactionForPurchaseResult(result: result)
+    try await finishTestTransaction(iapTransaction.transaction)
     let predicate = NSPredicate { _, _ -> Bool in
       let didLog = TestIAPTransactionLogger.newStoreKit2Transactions.contains {
         $0.transaction.id == iapTransaction.transaction.id

@@ -7,25 +7,52 @@
  */
 
 @testable import FBSDKCoreKit
-@testable import IAPTestsHostApp
 
-import StoreKitTest
 import XCTest
 
-final class AsyncSequenceTests: StoreKitTestCase {
+final class AsyncSequenceTests: XCTestCase {
 
-  func testGetValues() async throws {
-    guard let products =
-      try? await Product.products(for: [Self.ProductIdentifiers.nonConsumableProduct1.rawValue]) else {
-      return
+  // Test the generic collector with finite sequences; StoreKit purchase/history
+  // behavior is covered by TransactionTests and must not gate this unit test.
+  func testGetValues() async {
+    let expected = [3, 1, 3, -2]
+    let sequence = AsyncStream<Int> { continuation in
+      for value in expected {
+        continuation.yield(value)
+      }
+      continuation.finish()
     }
-    _ = try await products.first?.purchase()
-    let transactions = await Transaction.all.getValues()
-    var count = 0
-    for await asyncTransaction in Transaction.all {
-      let transaction = transactions[count]
-      XCTAssertEqual(asyncTransaction, transaction)
-      count += 1
+
+    let values = await sequence.getValues()
+
+    XCTAssertEqual(values, expected)
+  }
+
+  func testGetValuesFromEmptySequence() async {
+    let sequence = AsyncStream<Int> { continuation in
+      continuation.finish()
+    }
+
+    let values = await sequence.getValues()
+
+    XCTAssertTrue(values.isEmpty)
+  }
+
+  func testGetValuesPropagatesSequenceError() async {
+    enum TestError: Error {
+      case sequenceFailed
+    }
+    let sequence = AsyncThrowingStream<Int, Error> { continuation in
+      continuation.finish(throwing: TestError.sequenceFailed)
+    }
+
+    do {
+      _ = try await sequence.getValues()
+      XCTFail("Expected the sequence error to propagate")
+    } catch TestError.sequenceFailed {
+      // The original sequence error is preserved.
+    } catch {
+      XCTFail("Unexpected error: \(error)")
     }
   }
 }
