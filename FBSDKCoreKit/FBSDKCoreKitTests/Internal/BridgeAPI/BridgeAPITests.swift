@@ -138,6 +138,88 @@ final class BridgeAPITests: XCTestCase {
     )
   }
 
+  // MARK: - Bridge Request Cancellation
+
+  func testCancellingBridgeRequestClearsStateBeforeCallingCompletion() {
+    let request = TestBridgeAPIRequest(url: sampleURL)
+    var completionCount = 0
+    api.open(request, useSafariViewController: false, from: nil) { [self] response in
+      completionCount += 1
+      XCTAssertTrue(response.isCancelled)
+      XCTAssertIdentical(response.request, request)
+      XCTAssertNil(api.pendingRequest)
+      XCTAssertNil(api.pendingRequestCompletionBlock)
+      if completionCount == 1 {
+        api.cancelBridgeRequest()
+      }
+    }
+
+    api.cancelBridgeRequest()
+
+    XCTAssertEqual(completionCount, 1)
+  }
+
+  func testCancellingBridgeRequestPreservesRequestOpenedByCompletion() {
+    let originalRequest = TestBridgeAPIRequest(url: sampleURL)
+    let newRequest = TestBridgeAPIRequest(url: sampleURL)
+    var newCompletionCount = 0
+    api.open(originalRequest, useSafariViewController: false, from: nil) { [self] response in
+      XCTAssertTrue(response.isCancelled)
+      XCTAssertIdentical(response.request, originalRequest)
+      api.open(newRequest, useSafariViewController: false, from: nil) { newResponse in
+        XCTAssertTrue(newResponse.isCancelled)
+        XCTAssertIdentical(newResponse.request, newRequest)
+        newCompletionCount += 1
+      }
+    }
+
+    api.cancelBridgeRequest()
+
+    XCTAssertIdentical(api.pendingRequest, newRequest)
+    XCTAssertNotNil(api.pendingRequestCompletionBlock)
+    XCTAssertEqual(newCompletionCount, 0)
+    api.cancelBridgeRequest()
+    XCTAssertEqual(newCompletionCount, 1)
+    XCTAssertNil(api.pendingRequest)
+    XCTAssertNil(api.pendingRequestCompletionBlock)
+  }
+
+  func testBecomingActivePreservesRequestOpenedByCancellationCompletion() throws {
+    let originalRequest = TestBridgeAPIRequest(url: sampleURL)
+    let newRequest = TestBridgeAPIRequest(url: sampleURL)
+    var completionCount = 0
+    var newCompletionCount = 0
+    appURLSchemeProvider.appURLScheme = try XCTUnwrap(validBridgeResponseURL.scheme)
+    api.open(originalRequest, useSafariViewController: false, from: nil) { [self] response in
+      completionCount += 1
+      XCTAssertTrue(response.isCancelled)
+      api.open(newRequest, useSafariViewController: false, from: nil) { newResponse in
+        newCompletionCount += 1
+        XCTAssertFalse(newResponse.isCancelled)
+        XCTAssertIdentical(newResponse.request, newRequest)
+      }
+    }
+    api.applicationDidEnterBackground(UIApplication.shared)
+
+    api.applicationDidBecomeActive(UIApplication.shared)
+
+    XCTAssertEqual(completionCount, 1)
+    XCTAssertIdentical(api.pendingRequest, newRequest)
+    XCTAssertNotNil(api.pendingRequestCompletionBlock)
+    XCTAssertEqual(newCompletionCount, 0)
+    XCTAssertTrue(
+      api.application(
+        UIApplication.shared,
+        open: validBridgeResponseURL,
+        sourceApplication: sampleSource,
+        annotation: nil
+      )
+    )
+    XCTAssertEqual(newCompletionCount, 1)
+    XCTAssertNil(api.pendingRequest)
+    XCTAssertNil(api.pendingRequestCompletionBlock)
+  }
+
   // MARK: - Lifecycle Methods
 
   // MARK: Will Resign Active
