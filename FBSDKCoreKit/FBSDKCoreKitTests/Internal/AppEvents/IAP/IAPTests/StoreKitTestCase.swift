@@ -123,26 +123,34 @@ extension StoreKitTestCase {
     // Require the exact verified ID, allowing bounded publication across fresh snapshots.
     // Absence alone isn't evidence that a purchase was already finished.
     let deadline = Date().addingTimeInterval(5)
-    var observedID: UInt64?
+    var observedTransaction: Transaction?
     var attempt = 0
     repeat {
       attempt += 1
-      let before = try await verifiedUnfinishedIDs()
-      if before.contains(transaction.id), Date() <= deadline {
-        observedID = transaction.id
+      let before = try await verifiedUnfinishedTransactions()
+      if let matching = before.first(where: { $0.id == transaction.id }), Date() <= deadline {
+        observedTransaction = matching
         break
       }
       if attempt == 1 {
-        logStoreKitPhase("unfinished state not ready: target=\(transaction.id) ids=\(before)")
+        logStoreKitPhase("unfinished state not ready: target=\(transaction.id) ids=\(before.map(\.id))")
       }
       if Date() >= deadline { break }
       try await Task.sleep(nanoseconds: 100_000_000)
     } while Date() < deadline
     logStoreKitPhase("unfinished enumeration before finish completed after \(attempt) reads")
-    _ = try XCTUnwrap(observedID, "Fresh purchase missing from Transaction.unfinished within five seconds")
+    let unfinished = try XCTUnwrap(
+      observedTransaction,
+      "Fresh purchase missing from Transaction.unfinished within five seconds"
+    )
+    _ = try XCTUnwrap(unfinished.productID == transaction.productID ? unfinished : nil)
+    if #available(iOS 16.0, *) {
+      _ = try XCTUnwrap(unfinished.environment == .xcode ? unfinished : nil)
+    }
 
+    // Finish the verified same-ID value from the current unfinished snapshot.
     logStoreKitPhase("finish started")
-    await transaction.finish()
+    await unfinished.finish()
     logStoreKitPhase("finish completed")
 
     logStoreKitPhase("unfinished enumeration after finish started")
@@ -151,7 +159,7 @@ extension StoreKitTestCase {
     var finishReads = 0
     repeat {
       finishReads += 1
-      let after = try await verifiedUnfinishedIDs()
+      let after = try await verifiedUnfinishedTransactions().map(\.id)
       if !after.contains(transaction.id), Date() <= finishDeadline {
         finished = true
         break
@@ -166,15 +174,15 @@ extension StoreKitTestCase {
     _ = try XCTUnwrap(finished ? transaction : nil, "Finished purchase remained unfinished within five seconds")
   }
 
-  private func verifiedUnfinishedIDs() async throws -> [UInt64] {
-    var ids: [UInt64] = []
+  private func verifiedUnfinishedTransactions() async throws -> [Transaction] {
+    var transactions: [Transaction] = []
     for await result in Transaction.unfinished {
       switch result {
-      case let .verified(value): ids.append(value.id)
+      case let .verified(value): transactions.append(value)
       case let .unverified(_, error): throw error
       }
     }
-    return ids
+    return transactions
   }
 
   var testSession: SKTestSession {
