@@ -47,6 +47,7 @@ final class BridgeAPIProtocolNativeV1Tests: XCTestCase {
   }
 
   override func tearDown() {
+    notificationCenter.capturedCompletions = []
     errorFactory = nil
     bundle = nil
     notificationCenter = nil
@@ -592,7 +593,128 @@ final class BridgeAPIProtocolNativeV1Tests: XCTestCase {
     }
   }
 
+  func testReplacingPasteboardPayloadRemovesPreviousObserver() throws {
+    let protocolNative = makeGeneralPasteboardProtocol()
+    try requestPasteboardData(Data([1]), using: protocolNative)
+    try requestPasteboardData(Data([2]), using: protocolNative)
+
+    XCTAssertEqual(notificationCenter.capturedCompletions.count, 2)
+    XCTAssertEqual(notificationCenter.capturedRemovedObservers.count, 1)
+  }
+
+  func testPasteboardCleanupIsOneShot() throws {
+    let protocolNative = makeGeneralPasteboardProtocol()
+    let data = Data([1])
+    pasteboard.stubbedData = data
+    try requestPasteboardData(data, using: protocolNative)
+    let callback = try XCTUnwrap(notificationCenter.capturedCompletions.first)
+
+    callback(Notification(name: .FBSDKApplicationDidBecomeActive))
+    XCTAssertEqual(pasteboard.capturedData, Data())
+    XCTAssertEqual(notificationCenter.capturedRemovedObservers.count, 1)
+
+    pasteboard.capturedData = nil
+    callback(Notification(name: .FBSDKApplicationDidBecomeActive))
+    XCTAssertNil(pasteboard.capturedData, "A completed observation must not clear later clipboard contents")
+    XCTAssertEqual(notificationCenter.capturedRemovedObservers.count, 1)
+  }
+
+  func testChangedPasteboardEndsObservationWithoutClearing() throws {
+    let protocolNative = makeGeneralPasteboardProtocol()
+    try requestPasteboardData(Data([1]), using: protocolNative)
+    pasteboard.stubbedData = Data([2])
+    pasteboard.capturedData = nil
+    let callback = try XCTUnwrap(notificationCenter.capturedCompletions.first)
+
+    callback(Notification(name: .FBSDKApplicationDidBecomeActive))
+    XCTAssertNil(pasteboard.capturedData)
+    XCTAssertEqual(notificationCenter.capturedRemovedObservers.count, 1)
+
+    pasteboard.stubbedData = Data([1])
+    callback(Notification(name: .FBSDKApplicationDidBecomeActive))
+    XCTAssertNil(pasteboard.capturedData, "An old payload appearing later must not reactivate cleanup")
+  }
+
+  func testStaleCallbackDoesNotConsumeReplacementObservation() throws {
+    let protocolNative = makeGeneralPasteboardProtocol()
+    let data = Data([1])
+    try requestPasteboardData(data, using: protocolNative)
+    let staleCallback = try XCTUnwrap(notificationCenter.capturedCompletions.first)
+    try requestPasteboardData(data, using: protocolNative)
+    let currentCallback = try XCTUnwrap(notificationCenter.capturedCompletions.last)
+    pasteboard.stubbedData = data
+    pasteboard.capturedData = nil
+
+    staleCallback(Notification(name: .FBSDKApplicationDidBecomeActive))
+    XCTAssertNil(pasteboard.capturedData)
+    XCTAssertEqual(notificationCenter.capturedRemovedObservers.count, 1)
+
+    currentCallback(Notification(name: .FBSDKApplicationDidBecomeActive))
+    XCTAssertEqual(pasteboard.capturedData, Data())
+    XCTAssertEqual(notificationCenter.capturedRemovedObservers.count, 2)
+  }
+
+  func testPasteboardObservationDoesNotRetainProtocol() throws {
+    weak var weakProtocol: _BridgeAPIProtocolNativeV1?
+    try autoreleasepool {
+      let protocolNative = makeGeneralPasteboardProtocol()
+      weakProtocol = protocolNative
+      try requestPasteboardData(Data([1]), using: protocolNative)
+    }
+
+    XCTAssertNil(weakProtocol)
+    XCTAssertEqual(notificationCenter.capturedRemovedObservers.count, 1)
+  }
+
+  func testCleanupUnregistersFromTheOriginalNotificationCenter() throws {
+    let protocolNative = makeGeneralPasteboardProtocol()
+    try requestPasteboardData(Data([1]), using: protocolNative)
+    let callback = try XCTUnwrap(notificationCenter.capturedCompletions.first)
+    let replacementCenter = TestNotificationCenter()
+    _BridgeAPIProtocolNativeV1.setDependencies(
+      .init(
+        errorFactory: errorFactory,
+        bundle: bundle,
+        notificationDeliverer: replacementCenter,
+        internalUtility: internalUtility
+      )
+    )
+
+    callback(Notification(name: .FBSDKApplicationDidBecomeActive))
+
+    XCTAssertEqual(notificationCenter.capturedRemovedObservers.count, 1)
+    XCTAssertTrue(replacementCenter.capturedRemovedObservers.isEmpty)
+  }
+
+  func testCustomPasteboardDoesNotRegisterCleanup() throws {
+    let protocolNative = makeGeneralPasteboardProtocol()
+    pasteboard._isGeneralPasteboard = false
+    try requestPasteboardData(Data([1]), using: protocolNative)
+
+    XCTAssertTrue(notificationCenter.capturedCompletions.isEmpty)
+    XCTAssertEqual(pasteboard.capturedData, Data([1]))
+  }
+
   // MARK: - Helpers
+
+  private func makeGeneralPasteboardProtocol() -> _BridgeAPIProtocolNativeV1 {
+    pasteboard._isGeneralPasteboard = true
+    return _BridgeAPIProtocolNativeV1(
+      appScheme: scheme,
+      pasteboard: pasteboard,
+      dataLengthThreshold: 0,
+      shouldIncludeAppIcon: false
+    )
+  }
+
+  private func requestPasteboardData(_ data: Data, using protocolNative: _BridgeAPIProtocolNativeV1) throws {
+    _ = try protocolNative.requestURL(
+      actionID: actionID,
+      scheme: scheme,
+      methodName: methodName,
+      parameters: ["data": data]
+    )
+  }
 
   func stubEncodeQueryParameters(_ queryParameters: [String: Any]) -> [String: Any] {
     let encoded = [:] as NSMutableDictionary

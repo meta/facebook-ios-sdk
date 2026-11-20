@@ -21,6 +21,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `could not register fairplay decryption`
   ([#3997](https://github.com/meta/facebook-ios-sdk/issues/3997)). Apps on those versions can
   strip the slice in a build phase (`lipo -remove arm64e`) until they update.
+- Released native bridge pasteboard cleanup observers after activation or replacement, preventing retained image payloads
+  and stale cleanup callbacks.
 
 ## 19.0.1
 
