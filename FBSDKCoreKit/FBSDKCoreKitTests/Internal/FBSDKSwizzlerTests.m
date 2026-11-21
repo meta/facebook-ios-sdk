@@ -7,9 +7,61 @@
  */
 
 #import <FBSDKCoreKit/FBSDKCoreKit.h>
+#import <UIKit/UIKit.h>
 #import <XCTest/XCTest.h>
+#import <objc/runtime.h>
 
+#import "FBSDKAEMManager+Testing.h"
 #import "FBSDKSwizzler+Testing.h"
+
+@interface FBSDKAEMManager (DelegateTesting)
+- (void)setup;
+- (void)setupWithProxy;
+@property (nullable, nonatomic, assign) IMP originalAppDelegateOpenURLIMP;
+@property (nullable, nonatomic, assign) IMP originalAppDelegateContinueUserActivityIMP;
+@end
+
+@interface FBSDKAEMTestAppDelegate : NSObject <UIApplicationDelegate>
+@property (nonatomic) BOOL handled;
+@property (nonatomic) NSUInteger callCount;
+@property (nonatomic, strong) id capturedApplication;
+@property (nonatomic, strong) id capturedInput;
+@property (nonatomic, strong) id capturedOptions;
+@end
+
+@implementation FBSDKAEMTestAppDelegate
+
+- (BOOL)application:(UIApplication *)application
+            openURL:(NSURL *)url
+            options:(NSDictionary<UIApplicationOpenURLOptionsKey, id> *)options
+{
+  self.callCount++;
+  self.capturedApplication = application;
+  self.capturedInput = url;
+  self.capturedOptions = options;
+  return self.handled;
+}
+
+- (BOOL)application:(UIApplication *)application
+    continueUserActivity:(NSUserActivity *)userActivity
+      restorationHandler:(void (^)(NSArray<id<UIUserActivityRestoring>> *))restorationHandler
+{
+  self.callCount++;
+  self.capturedApplication = application;
+  self.capturedInput = userActivity;
+  self.capturedOptions = restorationHandler;
+  return self.handled;
+}
+
+@end
+
+@interface FBSDKAEMTestApplication : NSObject
+@property (nonatomic, weak) id<UIApplicationDelegate> delegate;
+@property (nonatomic, copy) NSSet<UIScene *> *connectedScenes;
+@end
+
+@implementation FBSDKAEMTestApplication
+@end
 
 @interface FBSDKSwizzlerTestObject : NSObject
 
@@ -141,6 +193,110 @@
 @end
 
 @implementation FBSDKSwizzlerTests
+
+- (void)testAEMSwizzlingPreservesOpenURLResult
+{
+  [self assertAEMDelegateResultWithProxy:NO universalLink:NO];
+}
+
+- (void)testAEMSwizzlingPreservesUniversalLinkResult
+{
+  [self assertAEMDelegateResultWithProxy:NO universalLink:YES];
+}
+
+- (void)testAEMProxyPreservesOpenURLResult
+{
+  [self assertAEMDelegateResultWithProxy:YES universalLink:NO];
+}
+
+- (void)testAEMProxyPreservesUniversalLinkResult
+{
+  [self assertAEMDelegateResultWithProxy:YES universalLink:YES];
+}
+
+- (void)assertAEMDelegateResultWithProxy:(BOOL)proxyEnabled universalLink:(BOOL)universalLink
+{
+  // CoreKit runs unhosted tests, so supply only the UIApplication boundary.
+  FBSDKAEMTestApplication *testApplication = [FBSDKAEMTestApplication new];
+  testApplication.connectedScenes = [NSSet set];
+  UIApplication *application = (UIApplication *)testApplication;
+  Method sharedApplicationMethod = class_getClassMethod(UIApplication.class, @selector(sharedApplication));
+  IMP originalSharedApplication = method_getImplementation(sharedApplicationMethod);
+  IMP sharedApplication = imp_implementationWithBlock(^id (id receiver) {
+    return application;
+  });
+  FBSDKAEMTestAppDelegate *delegate = [FBSDKAEMTestAppDelegate new];
+  Class delegateClass = delegate.class;
+  SEL openSelector = @selector(application:openURL:options:);
+  SEL continueSelector = @selector(application:continueUserActivity:restorationHandler:);
+  Method openMethod = class_getInstanceMethod(delegateClass, openSelector);
+  Method continueMethod = class_getInstanceMethod(delegateClass, continueSelector);
+  IMP originalOpen = method_getImplementation(openMethod);
+  IMP originalContinue = method_getImplementation(continueMethod);
+  FBSDKAEMManager *manager = FBSDKAEMManager.shared;
+  Class originalSwizzler = manager.swizzler;
+  Class originalReporter = manager.aemReporter;
+  id originalLogger = manager.eventLogger;
+  id originalUtility = manager.appEventsUtility;
+  IMP originalProxyOpen = manager.originalAppDelegateOpenURLIMP;
+  IMP originalProxyContinue = manager.originalAppDelegateContinueUserActivityIMP;
+
+  @try {
+    method_setImplementation(sharedApplicationMethod, sharedApplication);
+    application.delegate = delegate;
+    manager.swizzler = FBSDKSwizzler.class;
+    manager.aemReporter = nil;
+    manager.eventLogger = nil;
+    manager.appEventsUtility = nil;
+    if (proxyEnabled) {
+      [manager setupWithProxy];
+    } else {
+      [manager setup];
+    }
+
+    XCTestExpectation *expectation = [self expectationWithDescription:@"AEM hooks installed"];
+    [FBSDKSwizzler swizzleSelectorWithBlock:^{
+      [expectation fulfill];
+    } async:YES];
+    [self waitForExpectations:@[expectation] timeout:3];
+    XCTAssertNotEqual(method_getImplementation(openMethod), originalOpen);
+    XCTAssertNotEqual(method_getImplementation(continueMethod), originalContinue);
+
+    NSURL *url = [NSURL URLWithString:@"https://example.com/aem-delegate"];
+    NSUserActivity *activity = [[NSUserActivity alloc] initWithActivityType:NSUserActivityTypeBrowsingWeb];
+    activity.webpageURL = url;
+    NSDictionary *options = @{};
+    void (^restorationHandler)(NSArray<id<UIUserActivityRestoring>> *) =
+      ^(NSArray<id<UIUserActivityRestoring>> *objects) {};
+    for (NSNumber *handled in @[@YES, @NO]) {
+      delegate.handled = handled.boolValue;
+      NSUInteger previousCallCount = delegate.callCount;
+      BOOL result = universalLink
+        ? [delegate application:application continueUserActivity:activity restorationHandler:restorationHandler]
+        : [delegate application:application openURL:url options:options];
+      XCTAssertEqual(result, handled.boolValue, @"AEM must preserve the application's return value");
+      XCTAssertEqual(delegate.callCount, previousCallCount + 1);
+      XCTAssertEqual(delegate.capturedApplication, application);
+      XCTAssertEqual(delegate.capturedInput, universalLink ? activity : url);
+      XCTAssertEqual(delegate.capturedOptions, universalLink ? (id)restorationHandler : options);
+    }
+  } @finally {
+    if (!proxyEnabled) {
+      [FBSDKSwizzler unswizzleSelector:openSelector onClass:delegateClass named:@"AEMDeeplinkAutoSetup"];
+      [FBSDKSwizzler unswizzleSelector:continueSelector onClass:delegateClass named:@"AEMUniversallinkAutoSetup"];
+    }
+    method_setImplementation(openMethod, originalOpen);
+    method_setImplementation(continueMethod, originalContinue);
+    manager.originalAppDelegateOpenURLIMP = originalProxyOpen;
+    manager.originalAppDelegateContinueUserActivityIMP = originalProxyContinue;
+    manager.swizzler = originalSwizzler;
+    manager.aemReporter = originalReporter;
+    manager.eventLogger = originalLogger;
+    manager.appEventsUtility = originalUtility;
+    method_setImplementation(sharedApplicationMethod, originalSharedApplication);
+    imp_removeBlock(sharedApplication);
+  }
+}
 
 - (void)_testSwizzlingIsAsynchronousByDefault
 {

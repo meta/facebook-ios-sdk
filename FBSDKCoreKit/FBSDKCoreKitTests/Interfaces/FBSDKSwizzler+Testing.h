@@ -18,6 +18,8 @@ NS_ASSUME_NONNULL_BEGIN
                   named:(nullable NSString *)aName
                   async:(BOOL)async;
 
++ (void)swizzleSelectorWithBlock:(dispatch_block_t)block async:(BOOL)async;
+
 @end
 
 NS_ASSUME_NONNULL_END
